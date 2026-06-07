@@ -586,18 +586,18 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
   <div class="modal">
     <div class="modal-title">⚙️ 여행 설정</div>
     <div class="modal-section-title">📓 노션 연동</div>
-    <div class="modal-label">Anthropic API 키</div>
-    <input class="modal-input" id="s-apikey" placeholder="ntn_..." type="password">
-    <div class="notion-status-row" id="notion-status-row" style="display:none">
+    <div class="notion-status-row" id="notion-status-row">
       <div class="notion-status-dot" id="notion-status-dot"></div>
-      <span id="notion-status-text">노션 연결 확인 중...</span>
+      <span id="notion-status-text">확인 중...</span>
     </div>
+    <div class="modal-label" style="margin-top:8px">API 키 변경 (현재 키 유지하려면 비워두세요)</div>
+    <input class="modal-input" id="s-apikey" placeholder="ntn_... (변경 시에만 입력)" type="password">
     <div class="modal-section-title">🔗 구글 시트 연결 (선택)</div>
     <div class="modal-label">Apps Script URL</div>
     <input class="modal-input" id="s-url" placeholder="웹 앱 배포 URL">
-    <div class="modal-section-title">🗺️ 지도</div>
-    <div class="modal-label">카카오맵 API 키</div>
-    <input class="modal-input" id="s-kakao" placeholder="JavaScript 앱 키">
+    <div class="modal-section-title">🗺️ 카카오맵</div>
+    <div class="modal-label">API 키 변경 (현재 키 유지하려면 비워두세요)</div>
+    <input class="modal-input" id="s-kakao" placeholder="변경 시에만 입력">
     <div class="modal-section-title">👥 여행 멤버</div>
     <div class="modal-label">멤버 (쉼표로 구분)</div>
     <input class="modal-input" id="s-members" placeholder="min,송송이">
@@ -691,7 +691,7 @@ function saveNewTrip(){
     id:'trip_'+Date.now(), name, color:selectedColor,
     members:document.getElementById('at-members').value.trim()||'min',
     scriptUrl:document.getElementById('at-url').value.trim(),
-    kakaoKey:document.getElementById('at-kakao').value.trim(),
+    kakaoKey:document.getElementById('at-kakao').value.trim()||'',
     createdAt:new Date().toLocaleDateString('ko-KR'), dateStart:''
   };
   trips.push(trip); saveTrips(); closeAddTrip(); openTrip(trip.id);
@@ -706,7 +706,7 @@ function deleteTrip(id){
 
 function openTrip(id){
   const trip=trips.find(t=>t.id===id); if(!trip) return;
-  currentTripId=id; CFG.scriptUrl=trip.scriptUrl||''; CFG.kakaoKey=trip.kakaoKey||'';
+  currentTripId=id; CFG.scriptUrl=trip.scriptUrl||''; if(trip.kakaoKey) CFG.kakaoKey=trip.kakaoKey; // 기본값(고정키) 유지
   loadTripState(id);
   S.settings.members=trip.members||'min'; S.settings.tripName=trip.name;
   document.getElementById('home-screen').classList.add('hidden');
@@ -787,22 +787,23 @@ function renderMembers(){
   document.getElementById('member-chips').innerHTML=CFG.members.map(m=>`<div class="member-chip">👤 ${m}</div>`).join('');
 }
 function openSettings(){
-  document.getElementById('s-apikey').value=CFG.notionApiKey||'';
+  document.getElementById('s-apikey').value=''; // 키는 표시 안 함, 변경할 때만 입력
   document.getElementById('s-url').value=CFG.scriptUrl;
-  document.getElementById('s-kakao').value=CFG.kakaoKey;
+  document.getElementById('s-kakao').value=''; // 키는 표시 안 함
   document.getElementById('s-members').value=S.settings.members||'min,송송이';
-  if(CFG.notionApiKey){ document.getElementById('notion-status-row').style.display='flex'; setNotionStatusUI('ok','노션 연결됨'); }
+  // 노션 연결 상태 확인
+  if(CFG.notionApiKey){ verifyNotionKey(); }
+  else { setNotionStatusUI('err','API 키 없음'); }
   document.getElementById('settings-modal').classList.add('open');
 }
 function closeSettings(){ document.getElementById('settings-modal').classList.remove('open'); }
 async function saveSettings(){
   const newApiKey=document.getElementById('s-apikey').value.trim();
+  const newKakaoKey=document.getElementById('s-kakao').value.trim();
   CFG.scriptUrl=document.getElementById('s-url').value.trim();
-  CFG.kakaoKey=document.getElementById('s-kakao').value.trim();
+  if(newKakaoKey){ CFG.kakaoKey=newKakaoKey; kakaoMap=null; } // 키 바뀌면 지도 재초기화
   S.settings.members=document.getElementById('s-members').value.trim();
-  if(newApiKey) CFG.notionApiKey=newApiKey;
-  localStorage.setItem('tp-notion-api-key', CFG.notionApiKey||'');
-  if(newApiKey) verifyNotionKey();
+  if(newApiKey){ CFG.notionApiKey=newApiKey; localStorage.setItem('tp-notion-api-key', newApiKey); verifyNotionKey(); }
   const trip=trips.find(t=>t.id===currentTripId);
   if(trip){ trip.scriptUrl=CFG.scriptUrl; trip.kakaoKey=CFG.kakaoKey; trip.members=S.settings.members; saveTrips(); }
   applySettings(); closeSettings();
