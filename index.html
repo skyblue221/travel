@@ -628,7 +628,11 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 
 <script>
 // ===================== CONFIG =====================
-let CFG = { scriptUrl:'', kakaoKey:'80997111825554ef64ddb0481b4c0a76', members:['min','송송이'], notionApiKey:'ntn_D57510736385D5swL6CBiWx1kJNsVyjH6DcuyPhz0bW1rL', notionPageId:'' };
+const STORAGE_KEYS = {
+  notionApiKey: 'tp-notion-api-key',
+  kakaoKey: 'tp-kakao-key'
+};
+let CFG = { scriptUrl:'', kakaoKey:'80997111825554ef64ddb0481b4c0a76', members:['min','송송이'], notionApiKey:'', notionPageId:'' };
 
 // ===================== STATE =====================
 let S = {
@@ -676,6 +680,7 @@ function calcDday(d){
 
 function openAddTrip(){
   ['at-name','at-url','at-kakao'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('at-kakao').placeholder=CFG.kakaoKey?'저장된 카카오 키를 사용해요':'카카오 JavaScript 앱 키';
   document.getElementById('at-members').value='min,송송이';
   selectedColor='#c17f5a';
   document.querySelectorAll('.color-dot').forEach(d=>d.classList.toggle('active',d.dataset.color===selectedColor));
@@ -687,11 +692,16 @@ function pickColor(el){ selectedColor=el.dataset.color; document.querySelectorAl
 function saveNewTrip(){
   const name=document.getElementById('at-name').value.trim();
   if(!name){ alert('여행 이름을 입력해주세요'); return; }
+  const kakaoKey=document.getElementById('at-kakao').value.trim();
+  if(kakaoKey){
+    CFG.kakaoKey=kakaoKey;
+    localStorage.setItem(STORAGE_KEYS.kakaoKey, kakaoKey);
+  }
   const trip={
     id:'trip_'+Date.now(), name, color:selectedColor,
     members:document.getElementById('at-members').value.trim()||'min',
     scriptUrl:document.getElementById('at-url').value.trim(),
-    kakaoKey:document.getElementById('at-kakao').value.trim()||'',
+    kakaoKey:'',
     createdAt:new Date().toLocaleDateString('ko-KR'), dateStart:''
   };
   trips.push(trip); saveTrips(); closeAddTrip(); openTrip(trip.id);
@@ -706,7 +716,11 @@ function deleteTrip(id){
 
 function openTrip(id){
   const trip=trips.find(t=>t.id===id); if(!trip) return;
-  currentTripId=id; CFG.scriptUrl=trip.scriptUrl||''; if(trip.kakaoKey) CFG.kakaoKey=trip.kakaoKey; // 기본값(고정키) 유지
+  currentTripId=id; CFG.scriptUrl=trip.scriptUrl||'';
+  if(trip.kakaoKey){
+    CFG.kakaoKey=trip.kakaoKey;
+    localStorage.setItem(STORAGE_KEYS.kakaoKey, trip.kakaoKey);
+  }
   loadTripState(id);
   S.settings.members=trip.members||'min'; S.settings.tripName=trip.name;
   document.getElementById('home-screen').classList.add('hidden');
@@ -788,8 +802,10 @@ function renderMembers(){
 }
 function openSettings(){
   document.getElementById('s-apikey').value=''; // 키는 표시 안 함, 변경할 때만 입력
+  document.getElementById('s-apikey').placeholder=CFG.notionApiKey?'저장된 키가 있어요 (변경할 때만 입력)':'ntn_...';
   document.getElementById('s-url').value=CFG.scriptUrl;
   document.getElementById('s-kakao').value=''; // 키는 표시 안 함
+  document.getElementById('s-kakao').placeholder=CFG.kakaoKey?'저장된 키가 있어요 (변경할 때만 입력)':'카카오 JavaScript 앱 키';
   document.getElementById('s-members').value=S.settings.members||'min,송송이';
   // 노션 연결 상태 확인
   if(CFG.notionApiKey){ verifyNotionKey(); }
@@ -801,11 +817,17 @@ async function saveSettings(){
   const newApiKey=document.getElementById('s-apikey').value.trim();
   const newKakaoKey=document.getElementById('s-kakao').value.trim();
   CFG.scriptUrl=document.getElementById('s-url').value.trim();
-  if(newKakaoKey){ CFG.kakaoKey=newKakaoKey; kakaoMap=null; } // 키 바뀌면 지도 재초기화
+  if(newKakaoKey&&newKakaoKey!==CFG.kakaoKey){
+    CFG.kakaoKey=newKakaoKey;
+    localStorage.setItem(STORAGE_KEYS.kakaoKey, newKakaoKey);
+    kakaoMap=null;
+    const oldScript=document.getElementById('kakao-script');
+    if(oldScript) oldScript.remove();
+  } // 키 바뀌면 지도 재초기화
   S.settings.members=document.getElementById('s-members').value.trim();
-  if(newApiKey){ CFG.notionApiKey=newApiKey; localStorage.setItem('tp-notion-api-key', newApiKey); verifyNotionKey(); }
+  if(newApiKey){ CFG.notionApiKey=newApiKey; localStorage.setItem(STORAGE_KEYS.notionApiKey, newApiKey); verifyNotionKey(); }
   const trip=trips.find(t=>t.id===currentTripId);
-  if(trip){ trip.scriptUrl=CFG.scriptUrl; trip.kakaoKey=CFG.kakaoKey; trip.members=S.settings.members; saveTrips(); }
+  if(trip){ trip.scriptUrl=CFG.scriptUrl; trip.kakaoKey=''; trip.members=S.settings.members; saveTrips(); }
   applySettings(); closeSettings();
   if(CFG.kakaoKey&&!kakaoMap) loadKakaoMap();
   await postData({action:'saveSettings',settings:{'멤버':S.settings.members}});
@@ -950,11 +972,35 @@ function renderSchedule(){
 }
 
 // ===================== MAP =====================
+function setMapState(ready,msg){
+  document.getElementById('map-ui').style.display=ready?'block':'none';
+  const noKey=document.getElementById('map-no-key');
+  noKey.style.display=ready?'none':'block';
+  if(msg) noKey.innerHTML=msg;
+}
+function initKakaoMap(){
+  if(!window.kakao||!kakao.maps) return;
+  kakao.maps.load(()=>{
+    const container=document.getElementById('map');
+    const options={center:new kakao.maps.LatLng(37.5665,126.9780),level:7};
+    kakaoMap=new kakao.maps.Map(container,options);
+    setMapState(true);
+    setTimeout(()=>kakaoMap.relayout(),0);
+  });
+}
 function loadKakaoMap(){
-  if(!CFG.kakaoKey||document.getElementById('kakao-script')) return;
+  if(!CFG.kakaoKey){
+    setMapState(false,'🗺️ 지도를 사용하려면<br>설정에서 카카오맵 API 키를 입력해주세요<br><br><small>설정 ⚙️ → 카카오맵 API 키</small>');
+    return;
+  }
+  if(kakaoMap){ setMapState(true); setTimeout(()=>kakaoMap.relayout(),0); return; }
+  if(window.kakao&&kakao.maps){ initKakaoMap(); return; }
+  const existing=document.getElementById('kakao-script');
+  if(existing) return;
   const script=document.createElement('script'); script.id='kakao-script';
-  script.src=`//dapi.kakao.com/v2/maps/sdk.js?appkey=${CFG.kakaoKey}&libraries=services&autoload=false`;
-  script.onload=()=>{ kakao.maps.load(()=>{ const container=document.getElementById('map'); const options={center:new kakao.maps.LatLng(37.5665,126.9780),level:7}; kakaoMap=new kakao.maps.Map(container,options); document.getElementById('map-ui').style.display='block'; document.getElementById('map-no-key').style.display='none'; }); };
+  script.src=`https://dapi.kakao.com/v2/maps/sdk.js?appkey=${CFG.kakaoKey}&libraries=services&autoload=false`;
+  script.onload=initKakaoMap;
+  script.onerror=()=>setMapState(false,'🗺️ 카카오맵을 불러오지 못했어요<br>API 키와 등록된 사이트 도메인을 확인해주세요<br><br><small>카카오 개발자 콘솔에 현재 주소를 등록해야 해요</small>');
   document.head.appendChild(script);
 }
 function searchMap(){
@@ -1517,8 +1563,10 @@ async function verifyNotionKey(){
 
 function init(){
   // 로컬에 다른 키가 저장돼 있으면 우선 사용 (설정에서 변경한 경우)
-  const savedKey = localStorage.getItem('tp-notion-api-key');
-  if(savedKey) CFG.notionApiKey = savedKey;
+  const savedNotionKey = localStorage.getItem(STORAGE_KEYS.notionApiKey);
+  const savedKakaoKey = localStorage.getItem(STORAGE_KEYS.kakaoKey);
+  if(savedNotionKey) CFG.notionApiKey = savedNotionKey;
+  if(savedKakaoKey) CFG.kakaoKey = savedKakaoKey;
   loadTrips(); renderTripList();
 }
 init();
