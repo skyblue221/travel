@@ -858,8 +858,17 @@ function showTab(name,el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('sec-'+name).classList.add('active');
   el.classList.add('active');
-  if(name==='map'&&!kakaoMap&&CFG.kakaoKey) loadKakaoMap();
-  if(name==='map'&&!CFG.kakaoKey){ document.getElementById('map-ui').style.display='none'; document.getElementById('map-no-key').style.display='block'; }
+  if(name==='map'){
+    if(!CFG.kakaoKey){
+      document.getElementById('map-ui').style.display='none';
+      document.getElementById('map-no-key').style.display='block';
+    } else if(!kakaoMap){
+      loadKakaoMap();
+    } else {
+      // 이미 지도가 있으면 섹션이 완전히 보인 후 relayout
+      setTimeout(function(){ kakaoMap.relayout(); },100);
+    }
+  }
   if(name==='diary') populateDiaryDaySelect();
   if(name==='budget'){ populatePayerSelect(); renderBudget(); }
 }
@@ -985,7 +994,7 @@ function initKakaoMap(){
     const options={center:new kakao.maps.LatLng(37.5665,126.9780),level:7};
     kakaoMap=new kakao.maps.Map(container,options);
     setMapState(true);
-    setTimeout(()=>kakaoMap.relayout(),0);
+    setTimeout(()=>kakaoMap.relayout(),200);
   });
 }
 function loadKakaoMap(){
@@ -993,7 +1002,7 @@ function loadKakaoMap(){
     setMapState(false,'🗺️ 지도를 사용하려면<br>설정에서 카카오맵 API 키를 입력해주세요<br><br><small>설정 ⚙️ → 카카오맵 API 키</small>');
     return;
   }
-  if(kakaoMap){ setMapState(true); setTimeout(()=>kakaoMap.relayout(),0); return; }
+  if(kakaoMap){ setMapState(true); setTimeout(()=>kakaoMap.relayout(),100); return; }
   if(window.kakao&&kakao.maps){ initKakaoMap(); return; }
   const existing=document.getElementById('kakao-script');
   if(existing) return;
