@@ -760,15 +760,10 @@ function pickColor(el){ selectedColor=el.dataset.color; document.querySelectorAl
 function saveNewTrip(){
   const name=document.getElementById('at-name').value.trim();
   if(!name){ alert('여행 이름을 입력해주세요'); return; }
-  const kakaoKey=document.getElementById('at-kakao').value.trim();
-  if(kakaoKey){
-    CFG.kakaoKey=kakaoKey;
-    localStorage.setItem(STORAGE_KEYS.kakaoKey, kakaoKey);
-  }
   const trip={
     id:'trip_'+Date.now(), name, color:selectedColor,
     members:document.getElementById('at-members').value.trim()||'min',
-    scriptUrl:document.getElementById('at-url').value.trim(),
+    scriptUrl:'',
     kakaoKey:'',
     createdAt:new Date().toLocaleDateString('ko-KR'), dateStart:''
   };
