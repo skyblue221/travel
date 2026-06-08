@@ -405,13 +405,10 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
       <div class="color-dot" style="background:#d4836a" data-color="#d4836a" onclick="pickColor(this)"></div>
       <div class="color-dot" style="background:#6aab8e" data-color="#6aab8e" onclick="pickColor(this)"></div>
     </div>
-    <div class="modal-section-title">📓 노션 연동</div>
-    <div class="notion-info-box">노션 여행 DB에 자동으로 여행이 추가돼요.<br>설정에서 API 키를 먼저 입력해주세요.</div>
-    <div class="modal-section-title">🔗 구글 시트 연결 (선택)</div>
-    <div class="modal-label">Apps Script URL</div>
-    <input class="modal-input" id="at-url" placeholder="없으면 오프라인 모드로 시작">
-    <div class="modal-label">카카오맵 API 키 (선택)</div>
-    <input class="modal-input" id="at-kakao" placeholder="카카오 JavaScript 앱 키">
+    <div class="notion-info-box" style="margin-top:14px">
+      ☁️ Supabase에 자동 저장돼요<br>
+      📓 노션 동기화는 설정에서 할 수 있어요
+    </div>
     <div class="modal-btns">
       <button class="modal-cancel" onclick="closeAddTrip()">취소</button>
       <button class="modal-save" onclick="saveNewTrip()">여행 만들기 ✈️</button>
@@ -641,23 +638,30 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 <!-- SETTINGS MODAL -->
 <div class="modal-backdrop" id="settings-modal">
   <div class="modal">
-    <div class="modal-title">⚙️ 여행 설정</div>
-    <div class="modal-section-title">📓 노션 연동</div>
+    <div class="modal-title">⚙️ 설정</div>
+
+    <div class="modal-section-title">👥 이 여행 멤버</div>
+    <div class="modal-label">멤버 이름 (쉼표로 구분)</div>
+    <input class="modal-input" id="s-members" placeholder="min,송송이">
+
+    <div class="modal-section-title">☁️ Supabase</div>
+    <div class="notion-status-row" style="background:#e8f5f0">
+      <div class="notion-status-dot ok"></div>
+      <span style="font-size:12px;color:var(--text2)">연결됨 · 데이터 자동 저장 중</span>
+    </div>
+
+    <div class="modal-section-title">📓 노션 동기화</div>
     <div class="notion-status-row" id="notion-status-row">
       <div class="notion-status-dot" id="notion-status-dot"></div>
       <span id="notion-status-text">확인 중...</span>
     </div>
-    <div class="modal-label" style="margin-top:8px">API 키 변경 (현재 키 유지하려면 비워두세요)</div>
+    <div class="modal-label" style="margin-top:8px">노션 API 키 (변경할 때만 입력)</div>
     <input class="modal-input" id="s-apikey" placeholder="ntn_... (변경 시에만 입력)" type="password">
-    <div class="modal-section-title">🔗 구글 시트 연결 (선택)</div>
-    <div class="modal-label">Apps Script URL</div>
-    <input class="modal-input" id="s-url" placeholder="웹 앱 배포 URL">
+
     <div class="modal-section-title">🗺️ 카카오맵</div>
-    <div class="modal-label">API 키 변경 (현재 키 유지하려면 비워두세요)</div>
-    <input class="modal-input" id="s-kakao" placeholder="변경 시에만 입력">
-    <div class="modal-section-title">👥 여행 멤버</div>
-    <div class="modal-label">멤버 (쉼표로 구분)</div>
-    <input class="modal-input" id="s-members" placeholder="min,송송이">
+    <div class="modal-label">API 키 (변경할 때만 입력)</div>
+    <input class="modal-input" id="s-kakao" placeholder="현재 키가 있어요 (변경 시에만 입력)">
+
     <div class="modal-btns">
       <button class="modal-cancel" onclick="closeSettings()">취소</button>
       <button class="modal-save" onclick="saveSettings()">저장</button>
@@ -689,7 +693,15 @@ const STORAGE_KEYS = {
   notionApiKey: 'tp-notion-api-key',
   kakaoKey: 'tp-kakao-key'
 };
-let CFG = { scriptUrl:'', kakaoKey:'80997111825554ef64ddb0481b4c0a76', members:['min','송송이'], notionApiKey:'', notionPageId:'' };
+let CFG = {
+  scriptUrl: '',
+  kakaoKey: '80997111825554ef64ddb0481b4c0a76',
+  members: ['min','송송이'],
+  notionApiKey: '',
+  notionPageId: '',
+  supabaseUrl: 'https://zlkknzuzogeikrwzhyvv.supabase.co',
+  supabaseKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inpsa2tuenV6b2dlaWtyd3poeXZ2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5MTM3MzUsImV4cCI6MjA5NjQ4OTczNX0.aOyJhkNQqaKiJgzSmWikDhCg2Z6Syx6ZKcskRpvyLCQ'
+};
 
 // ===================== STATE =====================
 let S = {
@@ -736,8 +748,7 @@ function calcDday(d){
 }
 
 function openAddTrip(){
-  ['at-name','at-url','at-kakao'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('at-kakao').placeholder=CFG.kakaoKey?'저장된 카카오 키를 사용해요':'카카오 JavaScript 앱 키';
+  document.getElementById('at-name').value='';
   document.getElementById('at-members').value='min,송송이';
   selectedColor='#c17f5a';
   document.querySelectorAll('.color-dot').forEach(d=>d.classList.toggle('active',d.dataset.color===selectedColor));
@@ -761,13 +772,29 @@ function saveNewTrip(){
     kakaoKey:'',
     createdAt:new Date().toLocaleDateString('ko-KR'), dateStart:''
   };
-  trips.push(trip); saveTrips(); closeAddTrip(); openTrip(trip.id);
+  trips.push(trip); saveTrips(); closeAddTrip();
+  // Supabase에 여행 생성
+  if(CFG.supabaseUrl){
+    sbFetch('trips','POST',{
+      id: trip.id,
+      name: trip.name,
+      color: trip.color,
+      members: trip.members,
+      date_start: '',
+      date_end: '',
+      status: '계획 중'
+    }).catch(function(e){ console.error('trip create error:', e); });
+  }
+  openTrip(trip.id);
 }
 
 function deleteTrip(id){
   if(!confirm('이 여행을 삭제할까요?')) return;
   trips=trips.filter(t=>t.id!==id); saveTrips();
   localStorage.removeItem('tp-state-'+id);
+  if(CFG.supabaseUrl){
+    sbFetch('trips','DELETE',null,'id=eq.'+id).catch(function(e){ console.error(e); });
+  }
   renderTripList();
 }
 
@@ -782,7 +809,7 @@ function openTrip(id){
   S.settings.members=trip.members||'min'; S.settings.tripName=trip.name;
   document.getElementById('home-screen').classList.add('hidden');
   applySettings(); renderAll();
-  if(CFG.scriptUrl) fetchData();
+  fetchData(); // Supabase에서 데이터 로드
   if(CFG.kakaoKey) loadKakaoMap();
   setSyncStatus(CFG.scriptUrl?'loading':'offline');
   // 노션 바
@@ -816,29 +843,105 @@ function saveLocal(){ if(currentTripId) saveTripState(currentTripId); }
 function setSyncStatus(status){
   const dot=document.getElementById('sync-dot'), text=document.getElementById('sync-text');
   dot.className='sync-dot';
-  if(status==='ok'){dot.classList.add('ok');text.textContent='시트 연결됨 · 자동 저장 중';}
-  else if(status==='loading'){dot.classList.add('loading');text.textContent='동기화 중...';}
+  if(status==='ok'){dot.classList.add('ok');text.textContent='Supabase 연결됨 · 저장 완료';}
+  else if(status==='loading'){dot.classList.add('loading');text.textContent='Supabase 불러오는 중...';}
   else if(status==='err'){dot.classList.add('err');text.textContent='연결 오류 · 로컬 저장 중';}
-  else{text.textContent='오프라인 모드 · 로컬 저장 중';}
+  else{text.textContent='로컬 저장 중 (Supabase 미연결)';}
 }
+// ── Supabase API 헬퍼 ──
+async function sbFetch(table, method, body, query){
+  const base = CFG.supabaseUrl + '/rest/v1/' + table;
+  const url = query ? base + '?' + query : base;
+  const opts = {
+    method: method||'GET',
+    headers: {
+      'apikey': CFG.supabaseKey,
+      'Authorization': 'Bearer ' + CFG.supabaseKey,
+      'Content-Type': 'application/json',
+      'Prefer': method==='POST' ? 'return=representation' : ''
+    }
+  };
+  if(body) opts.body = JSON.stringify(body);
+  const res = await fetch(url, opts);
+  if(!res.ok){ const e=await res.json(); throw new Error(JSON.stringify(e)); }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
 async function fetchData(){
-  if(!CFG.scriptUrl) return; setSyncStatus('loading');
+  if(!CFG.supabaseUrl){ saveLocal(); return; }
+  const tripId = currentTripId; if(!tripId) return;
+  setSyncStatus('loading');
   try{
-    const res=await fetch(CFG.scriptUrl+'?action=get'); const data=await res.json();
-    if(data.ok){
-      if(data.wish?.length) S.wish=data.wish.map(r=>({...r,done:r.done==='true'||r.done===true}));
-      if(data.checklist?.length) S.checklist=data.checklist.map(r=>({...r,checked:r.checked==='true'||r.checked===true}));
-      if(data.schedule?.length) S.schedule=data.schedule.map(r=>({...r,dayIdx:Number(r.dayIdx)}));
-      if(data.memos?.length) S.memos=data.memos;
-      if(data.settings) applyRemoteSettings(data.settings);
-      saveLocal(); renderAll(); setSyncStatus('ok');
-    } else setSyncStatus('err');
-  }catch(e){ setSyncStatus('err'); }
+    const [wish, checklist, schedule, memos, expenses] = await Promise.all([
+      sbFetch('wish',      'GET', null, 'trip_id=eq.'+tripId+'&order=created_at.asc'),
+      sbFetch('checklist', 'GET', null, 'trip_id=eq.'+tripId+'&order=created_at.asc'),
+      sbFetch('schedule',  'GET', null, 'trip_id=eq.'+tripId+'&order=day_idx.asc,created_at.asc'),
+      sbFetch('memos',     'GET', null, 'trip_id=eq.'+tripId+'&order=created_at.desc'),
+      sbFetch('expenses',  'GET', null, 'trip_id=eq.'+tripId+'&order=created_at.asc'),
+    ]);
+    // Supabase 컬럼명 → 앱 필드명 매핑
+    S.wish      = (wish||[]).map(function(r){ return {id:r.id,type:r.type,text:r.text,done:r.done}; });
+    S.checklist = (checklist||[]).map(function(r){ return {id:r.id,cat:r.cat,text:r.text,checked:r.checked}; });
+    S.schedule  = (schedule||[]).map(function(r){ return {id:r.id,dayIdx:r.day_idx,dayLabel:r.day_label,date:r.date,time:r.time,content:r.content,cat:r.cat}; });
+    S.memos     = (memos||[]).map(function(r){ return {id:r.id,title:r.title,body:r.body,createdAt:r.created_at}; });
+    S.expenses  = (expenses||[]).map(function(r){ return {id:r.id,payer:r.payer,cat:r.cat,desc:r.description,amount:r.amount}; });
+    saveLocal(); renderAll(); setSyncStatus('ok');
+  } catch(e){ console.error(e); setSyncStatus('err'); }
 }
+
 async function postData(payload){
-  if(!CFG.scriptUrl){ saveLocal(); return; }
-  try{ await fetch(CFG.scriptUrl,{method:'POST',body:JSON.stringify(payload)}); setSyncStatus('ok'); }catch(e){ setSyncStatus('err'); }
-  saveLocal();
+  saveLocal(); // 로컬엔 항상 저장
+  if(!CFG.supabaseUrl) return;
+  const tripId = currentTripId; if(!tripId) return;
+
+  // 시트명 → 테이블명 매핑
+  const tableMap = {'위시리스트':'wish','체크리스트':'checklist','일정':'schedule','메모':'memos','예산':'expenses'};
+
+  try{
+    if(payload.action === 'saveSettings'){
+      const settings = payload.settings||{};
+      const update = {};
+      if(settings['여행명']  !== undefined) update.name       = settings['여행명'];
+      if(settings['출발일']  !== undefined) update.date_start = settings['출발일'];
+      if(settings['귀국일']  !== undefined) update.date_end   = settings['귀국일'];
+      if(settings['멤버']    !== undefined) update.members    = settings['멤버'];
+      if(Object.keys(update).length){
+        await sbFetch('trips', 'PATCH', update, 'id=eq.'+tripId);
+      }
+      setSyncStatus('ok');
+      return;
+    }
+
+    const table = tableMap[payload.sheet];
+    if(!table) return;
+
+    if(payload.action === 'addRow'){
+      const r = payload.row;
+      let row = { id: r.id, trip_id: tripId };
+      if(table==='wish')      { row.type=r.type; row.text=r.text; row.done=r.done==='true'||r.done===true; }
+      if(table==='checklist') { row.cat=r.cat; row.text=r.text; row.checked=r.checked==='true'||r.checked===true; }
+      if(table==='schedule')  { row.day_idx=Number(r.dayIdx); row.day_label=r.dayLabel; row.date=r.date; row.time=r.time; row.content=r.content; row.cat=r.cat; }
+      if(table==='memos')     { row.title=r.title; row.body=r.body; }
+      if(table==='expenses')  { row.payer=r.payer; row.cat=r.cat; row.description=r.desc; row.amount=Number(r.amount); }
+      await sbFetch(table, 'POST', row);
+    }
+    else if(payload.action === 'updateRow'){
+      const fieldMap = {
+        'done':'done', 'checked':'checked',
+        'text':'text', 'cat':'cat',
+        'content':'content', 'time':'time'
+      };
+      const col = fieldMap[payload.field] || payload.field;
+      let val = payload.value;
+      if(col==='done'||col==='checked') val = val==='true'||val===true;
+      await sbFetch(table, 'PATCH', {[col]:val}, 'id=eq.'+payload.id);
+    }
+    else if(payload.action === 'deleteRow'){
+      await sbFetch(table, 'DELETE', null, 'id=eq.'+payload.id);
+    }
+    setSyncStatus('ok');
+  } catch(e){ console.error('Supabase error:', e); setSyncStatus('err'); }
 }
 
 // ===================== SETTINGS =====================
@@ -860,9 +963,7 @@ function renderMembers(){
 function openSettings(){
   document.getElementById('s-apikey').value=''; // 키는 표시 안 함, 변경할 때만 입력
   document.getElementById('s-apikey').placeholder=CFG.notionApiKey?'저장된 키가 있어요 (변경할 때만 입력)':'ntn_...';
-  document.getElementById('s-url').value=CFG.scriptUrl;
-  document.getElementById('s-kakao').value=''; // 키는 표시 안 함
-  document.getElementById('s-kakao').placeholder=CFG.kakaoKey?'저장된 키가 있어요 (변경할 때만 입력)':'카카오 JavaScript 앱 키';
+  document.getElementById('s-kakao').value='';
   document.getElementById('s-members').value=S.settings.members||'min,송송이';
   // 노션 연결 상태 확인
   if(CFG.notionApiKey){ verifyNotionKey(); }
@@ -884,7 +985,7 @@ async function saveSettings(){
   S.settings.members=document.getElementById('s-members').value.trim();
   if(newApiKey){ CFG.notionApiKey=newApiKey; localStorage.setItem(STORAGE_KEYS.notionApiKey, newApiKey); verifyNotionKey(); }
   const trip=trips.find(t=>t.id===currentTripId);
-  if(trip){ trip.scriptUrl=CFG.scriptUrl; trip.kakaoKey=''; trip.members=S.settings.members; saveTrips(); }
+  if(trip){ trip.members=S.settings.members; saveTrips(); }
   applySettings(); closeSettings();
   if(CFG.kakaoKey&&!kakaoMap) loadKakaoMap();
   await postData({action:'saveSettings',settings:{'멤버':S.settings.members}});
