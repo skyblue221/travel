@@ -163,8 +163,13 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 .map-search-input{flex:1;border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;font-size:13px;font-family:inherit;outline:none;color:var(--text);background:var(--surface)}
 .map-search-input:focus{border-color:var(--accent)}
 .map-search-btn{background:var(--accent2);color:white;border:none;border-radius:10px;padding:10px 14px;font-size:13px;cursor:pointer;font-family:inherit}
-.map-pin-item{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface);border-radius:8px;margin-bottom:5px;border:1px solid var(--border);font-size:12px}
+.map-pin-item{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--surface);border-radius:8px;margin-bottom:5px;border:1px solid var(--border);font-size:12px;transition:background .15s}
+.map-pin-item:hover{background:var(--surface2)}
 .map-pin-num{background:var(--accent);color:white;border-radius:50%;width:20px;height:20px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;flex-shrink:0}
+.map-pin-btns{display:flex;flex-direction:column;gap:1px;flex-shrink:0}
+.map-pin-btn{background:var(--surface2);border:1px solid var(--border);border-radius:4px;width:20px;height:18px;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--text2);line-height:1}
+.map-pin-btn:hover{background:var(--accent3);border-color:var(--accent)}
+.map-pin-btn:disabled{opacity:.3;cursor:default}
 .map-route-btn{width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px;font-size:13px;color:var(--text2);cursor:pointer;font-family:inherit;transition:all .2s}
 .map-route-btn:hover{background:var(--accent3);border-color:var(--accent)}
 .map-no-key{background:var(--surface2);border-radius:var(--radius);padding:30px;text-align:center;color:var(--text3);font-size:13px;line-height:2}
@@ -713,8 +718,45 @@ let kakaoMap=null, mapPins=[];
 let trips=[], currentTripId=null, selectedColor='#c17f5a';
 
 // ===================== TRIPS =====================
-function loadTrips(){ try{ trips=JSON.parse(localStorage.getItem('tp-trips')||'[]'); }catch(e){ trips=[]; } }
-function saveTrips(){ localStorage.setItem('tp-trips',JSON.stringify(trips)); }
+function loadTrips(){
+  // 로컬 캐시에서 먼저 빠르게 불러오기
+  try{ trips=JSON.parse(localStorage.getItem('tp-trips')||'[]'); }catch(e){ trips=[]; }
+}
+function saveTrips(){
+  // 로컬 캐시 저장
+  localStorage.setItem('tp-trips',JSON.stringify(trips));
+}
+async function loadTripsFromSupabase(){
+  // Supabase에서 최신 여행 목록 불러오기
+  try{
+    const data = await sbFetch('trips','GET',null,'order=created_at.asc');
+    if(!data||!data.length) return;
+    // Supabase 데이터로 trips 업데이트 (로컬 설정값은 유지)
+    const localMap = {};
+    trips.forEach(function(t){ localMap[t.id]=t; });
+    trips = data.map(function(r){
+      const local = localMap[r.id]||{};
+      return {
+        id: r.id,
+        name: r.name,
+        color: r.color||local.color||'#c17f5a',
+        members: r.members||local.members||'min',
+        dateStart: r.date_start||local.dateStart||'',
+        dateEnd: r.date_end||local.dateEnd||'',
+        status: r.status||'계획 중',
+        scriptUrl: local.scriptUrl||'',
+        kakaoKey: local.kakaoKey||'',
+        notionPageId: local.notionPageId||'',
+        createdAt: local.createdAt||''
+      };
+    });
+    saveTrips(); // 로컬 캐시도 업데이트
+    renderTripList();
+  } catch(e){
+    console.error('Supabase trips load error:', e);
+    // 실패해도 로컬 데이터로 계속 동작
+  }
+}
 
 function renderTripList(){
   const el=document.getElementById('trip-list');
@@ -780,6 +822,7 @@ function saveNewTrip(){
       status: '계획 중'
     }).catch(function(e){ console.error('trip create error:', e); });
   }
+  renderTripList();
   openTrip(trip.id);
 }
 
@@ -989,12 +1032,30 @@ async function saveSettings(){
 
 // ===================== DATE =====================
 let nameTimer;
-function onTripNameChange(){ S.settings.tripName=document.getElementById('trip-name-input').value; clearTimeout(nameTimer); nameTimer=setTimeout(async()=>{ await postData({action:'saveSettings',settings:{'여행명':S.settings.tripName}}); },1000); saveLocal(); }
+function onTripNameChange(){
+  S.settings.tripName=document.getElementById('trip-name-input').value;
+  clearTimeout(nameTimer);
+  nameTimer=setTimeout(async function(){
+    await postData({action:'saveSettings',settings:{'여행명':S.settings.tripName}});
+    // Supabase trips 테이블도 업데이트
+    if(CFG.supabaseUrl&&currentTripId){
+      sbFetch('trips','PATCH',{name:S.settings.tripName},'id=eq.'+currentTripId).catch(function(e){});
+    }
+    const t=trips.find(function(t){return t.id===currentTripId;});
+    if(t){ t.name=S.settings.tripName; saveTrips(); }
+  },1000);
+  saveLocal();
+}
 async function onDateChange(){
   S.settings.dateStart=document.getElementById('date-start').value;
   S.settings.dateEnd=document.getElementById('date-end').value;
   updateDday();
-  const t=trips.find(t=>t.id===currentTripId); if(t){ t.dateStart=S.settings.dateStart; saveTrips(); }
+  const t=trips.find(function(t){return t.id===currentTripId;});
+  if(t){ t.dateStart=S.settings.dateStart; t.dateEnd=S.settings.dateEnd; saveTrips(); }
+  // Supabase trips 테이블도 업데이트
+  if(CFG.supabaseUrl&&currentTripId){
+    sbFetch('trips','PATCH',{date_start:S.settings.dateStart,date_end:S.settings.dateEnd},'id=eq.'+currentTripId).catch(function(e){});
+  }
   await postData({action:'saveSettings',settings:{'출발일':S.settings.dateStart,'귀국일':S.settings.dateEnd}});
 }
 function updateDday(){
@@ -1174,18 +1235,68 @@ function searchMap(){
       const place=data[0], lat=parseFloat(place.y), lng=parseFloat(place.x), pos=new kakao.maps.LatLng(lat,lng);
       kakaoMap.setCenter(pos); kakaoMap.setLevel(4);
       const marker=new kakao.maps.Marker({map:kakaoMap,position:pos});
-      const info=new kakao.maps.InfoWindow({content:`<div style="padding:6px 10px;font-size:12px;font-family:sans-serif">${place.place_name}</div>`});
-      info.open(kakaoMap,marker); mapPins.push({name:place.place_name,lat,lng,marker});
+      const pinNum = mapPins.length+1;
+      const info=new kakao.maps.InfoWindow({content:'<div style="padding:4px 8px;font-size:11px;font-family:sans-serif">'+pinNum+'. '+place.place_name+'</div>'});
+      info.open(kakaoMap,marker);
+      const pin={name:place.place_name,lat,lng,marker,infoWindow:info};
+      marker.addListener('click',(function(p){ return function(){ p.infoWindow.open(kakaoMap,p.marker); }; })(pin));
+      mapPins.push(pin);
       renderMapPins(); document.getElementById('map-search-inp').value='';
-      showToast(`📍 ${place.place_name} 추가됨`);
+      showToast('📍 '+place.place_name+' 추가됨');
     } else showToast('장소를 찾을 수 없어요 😢');
   });
 }
 function renderMapPins(){
-  const el=document.getElementById('map-pins'); if(!mapPins.length){ el.innerHTML=''; return; }
-  el.innerHTML=mapPins.map((p,i)=>`<div class="map-pin-item"><div class="map-pin-num">${i+1}</div><span style="flex:1;font-size:12px">${p.name}</span><span style="font-size:12px;color:var(--text3);cursor:pointer" onclick="removePin(${i})">×</span></div>`).join('');
+  const el=document.getElementById('map-pins');
+  if(!mapPins.length){ el.innerHTML=''; return; }
+  let html='';
+  mapPins.forEach(function(p,i){
+    const isFirst = i===0;
+    const isLast = i===mapPins.length-1;
+    html += '<div class="map-pin-item">'
+      + '<div class="map-pin-num">'+(i+1)+'</div>'
+      + '<span style="flex:1;font-size:12px">'+p.name+'</span>'
+      + '<div class="map-pin-btns">'
+      + '<button class="map-pin-btn" onclick="movePinUp('+i+')" '+(isFirst?'disabled':'')+'>▲</button>'
+      + '<button class="map-pin-btn" onclick="movePinDown('+i+')" '+(isLast?'disabled':'')+'>▼</button>'
+      + '</div>'
+      + '<span style="font-size:14px;color:var(--text3);cursor:pointer;padding:0 4px;margin-left:2px" onclick="removePin('+i+')">×</span>'
+      + '</div>';
+  });
+  el.innerHTML=html;
 }
-function removePin(idx){ mapPins[idx].marker.setMap(null); mapPins.splice(idx,1); renderMapPins(); }
+function removePin(idx){
+  mapPins[idx].marker.setMap(null);
+  mapPins.splice(idx,1);
+  updatePinMarkers();
+  renderMapPins();
+}
+function movePinUp(idx){
+  if(idx===0) return;
+  const tmp=mapPins[idx]; mapPins[idx]=mapPins[idx-1]; mapPins[idx-1]=tmp;
+  updatePinMarkers();
+  renderMapPins();
+}
+function movePinDown(idx){
+  if(idx===mapPins.length-1) return;
+  const tmp=mapPins[idx]; mapPins[idx]=mapPins[idx+1]; mapPins[idx+1]=tmp;
+  updatePinMarkers();
+  renderMapPins();
+}
+function updatePinMarkers(){
+  // 마커 번호 라벨 업데이트 (기존 마커 제거 후 재생성)
+  mapPins.forEach(function(p,i){
+    if(p.marker) p.marker.setMap(null);
+    if(!kakaoMap) return;
+    const pos = new kakao.maps.LatLng(p.lat, p.lng);
+    p.marker = new kakao.maps.Marker({ map: kakaoMap, position: pos });
+    const info = new kakao.maps.InfoWindow({
+      content: '<div style="padding:4px 8px;font-size:11px;font-family:sans-serif">'+(i+1)+'. '+p.name+'</div>'
+    });
+    p.infoWindow = info;
+    p.marker.addListener('click', (function(pin){ return function(){ pin.infoWindow.open(kakaoMap, pin.marker); }; })(p));
+  });
+}
 function drawRoute(){
   if(!kakaoMap||mapPins.length<2){ showToast('핀을 2개 이상 추가해야 루트를 그릴 수 있어요'); return; }
   const linePath=mapPins.map(p=>new kakao.maps.LatLng(p.lat,p.lng));
@@ -1758,12 +1869,14 @@ async function verifyNotionKey(){
 }
 
 function init(){
-  // 로컬에 다른 키가 저장돼 있으면 우선 사용 (설정에서 변경한 경우)
   const savedNotionKey = localStorage.getItem(STORAGE_KEYS.notionApiKey);
   const savedKakaoKey = localStorage.getItem(STORAGE_KEYS.kakaoKey);
   if(savedNotionKey) CFG.notionApiKey = savedNotionKey;
   if(savedKakaoKey) CFG.kakaoKey = savedKakaoKey;
+  // 로컬 캐시로 먼저 빠르게 표시
   loadTrips(); renderTripList();
+  // Supabase에서 최신 목록 불러와서 업데이트
+  loadTripsFromSupabase();
 }
 init();
 </script>
