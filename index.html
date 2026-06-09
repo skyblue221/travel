@@ -173,6 +173,9 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 .map-pin-btn:disabled{opacity:.3;cursor:default}
 .map-route-btn{width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px;font-size:13px;color:var(--text2);cursor:pointer;font-family:inherit;transition:all .2s}
 .map-route-btn:hover{background:var(--accent3);border-color:var(--accent)}
+.map-day-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.map-day-tab{background:var(--surface2);border:1.5px solid var(--border);border-radius:20px;padding:5px 14px;font-size:12px;color:var(--text2);cursor:pointer;transition:all .15s;white-space:nowrap;font-family:inherit}
+.map-day-tab.active{background:var(--accent);border-color:var(--accent);color:white;font-weight:500}
 .map-no-key{background:var(--surface2);border-radius:var(--radius);padding:30px;text-align:center;color:var(--text3);font-size:13px;line-height:2}
 
 /* MEMO */
@@ -541,14 +544,20 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 <!-- MAP -->
 <div class="section" id="sec-map">
   <div class="section-title">🗺️ 지도</div>
+  <!-- Day 선택 탭 (지도 유무와 관계없이 항상 표시) -->
+  <div class="map-day-tabs" id="map-day-tabs"></div>
   <div id="map-ui">
+    <!-- 검색 -->
     <div class="map-search-row">
       <input class="map-search-input" id="map-search-inp" placeholder="장소 검색 (예: 경복궁, 성수동 카페)" onkeydown="if(event.key==='Enter')searchMap()">
       <button class="map-search-btn" onclick="searchMap()">검색</button>
     </div>
     <div id="map-container"><div id="map"></div></div>
     <div class="map-pins" id="map-pins"></div>
-    <button class="map-route-btn" onclick="drawRoute()">🛣️ 루트 그리기</button>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button class="map-route-btn" style="flex:1" onclick="drawRoute()">🛣️ 루트 그리기</button>
+      <button class="map-route-btn" style="flex:0 0 auto;padding:10px 14px" onclick="clearRoute()" title="루트 지우기">🗑️</button>
+    </div>
   </div>
   <div class="map-no-key hidden" id="map-no-key" style="display:none">
     🗺️ 지도를 사용하려면<br>설정에서 카카오맵 API 키를 입력해주세요<br><br><small>설정 ⚙️ → 카카오맵 API 키</small>
@@ -727,7 +736,7 @@ let S = {
   settings:{tripName:'',dateStart:'',dateEnd:'',members:'min,송송이'}
 };
 let checkFilter='all', diaryView='scrap', pendingPhotoData=null;
-let kakaoMap=null, mapPins=[];
+let kakaoMap=null, mapPins=[], currentMapDay='all', drawnPolylines=[];
 let trips=[], currentTripId=null, selectedColor='#c17f5a';
 
 // ===================== TRIPS =====================
@@ -886,9 +895,10 @@ function loadTripState(id){
   if(!S.diary) S.diary=[];
   if(!S.expenses) S.expenses=[];
   if(!S.mapPinsData) S.mapPinsData=[];
+  if(!S.dayRoutes) S.dayRoutes={};
 }
 function saveTripState(id){ localStorage.setItem('tp-state-'+id,JSON.stringify(S)); }
-function resetState(){ S={wish:[],checklist:[],schedule:[],memos:[],diary:[],expenses:[],mapPinsData:[],settings:{tripName:'',dateStart:'',dateEnd:'',members:'min,송송이'}}; }
+function resetState(){ S={wish:[],checklist:[],schedule:[],memos:[],diary:[],expenses:[],mapPinsData:[],dayRoutes:{},settings:{tripName:'',dateStart:'',dateEnd:'',members:'min,송송이'}}; }
 function saveLocal(){ if(currentTripId) saveTripState(currentTripId); }
 
 // ===================== SYNC =====================
@@ -1087,6 +1097,8 @@ function showTab(name,el){
   document.getElementById('sec-'+name).classList.add('active');
   el.classList.add('active');
   if(name==='map'){
+    // Day 탭은 카카오맵 여부와 관계없이 항상 렌더링
+    renderMapDayTabs();
     if(!CFG.kakaoKey){
       document.getElementById('map-ui').style.display='none';
       document.getElementById('map-no-key').style.display='block';
@@ -1095,10 +1107,8 @@ function showTab(name,el){
     } else {
       setTimeout(function(){
         kakaoMap.relayout();
-        // 저장된 핀 복원 (지도는 있는데 핀이 없을 때)
-        if(mapPins.length===0 && S.mapPinsData && S.mapPinsData.length){
-          restoreMapPins();
-        }
+        renderMapDayTabs();
+        if(mapPins.length===0) restoreMapPins();
       },100);
     }
   }
@@ -1173,8 +1183,22 @@ function renderChecklist(){
 // ===================== SCHEDULE =====================
 function getDayGroups(){
   const groups={};
-  S.schedule.forEach(item=>{ const k=item.dayIdx; if(!groups[k]) groups[k]={dayIdx:Number(item.dayIdx),dayLabel:item.dayLabel,date:item.date,items:[]}; groups[k].items.push(item); });
-  return Object.values(groups).sort((a,b)=>a.dayIdx-b.dayIdx);
+  S.schedule.forEach(function(item){
+    const k=item.dayIdx;
+    if(!groups[k]) groups[k]={dayIdx:Number(item.dayIdx),dayLabel:item.dayLabel,date:item.date,items:[]};
+    groups[k].items.push(item);
+  });
+  const result = Object.values(groups).sort(function(a,b){return a.dayIdx-b.dayIdx;});
+  // 각 Day 안에서 시간 있는 항목은 정렬, 없는 항목은 뒤에 입력순 유지
+  result.forEach(function(day){
+    const withTime    = day.items.filter(function(i){return i.time&&i.time.trim();});
+    const withoutTime = day.items.filter(function(i){return !i.time||!i.time.trim();});
+    withTime.sort(function(a,b){
+      return a.time.replace(':','').localeCompare(b.time.replace(':',''));
+    });
+    day.items = withTime.concat(withoutTime);
+  });
+  return result;
 }
 async function addDay(){
   const days=getDayGroups(), dayIdx=days.length;
@@ -1209,6 +1233,10 @@ function renderSchedule(){
     h+='<div class="schedule-items">';
     const visItems=day.items.filter(function(i){return i.content;});
     if(!visItems.length){ h+='<div style="padding:8px;font-size:11px;color:var(--text3);text-align:center">일정을 추가해요</div>'; }
+    const hasAnyTime = visItems.some(function(i){return i.time&&i.time.trim();});
+    if(hasAnyTime && visItems.length>1){
+      h+='<div style="font-size:10px;color:var(--accent2);padding:4px 8px 2px;letter-spacing:.04em">⏱ 시간순 정렬됨</div>';
+    }
     visItems.forEach(function(item){
       h+='<div class="schedule-item">';
       h+='<span class="schedule-time">'+(item.time||'──')+'</span>';
@@ -1233,7 +1261,12 @@ function renderSchedule(){
 
 // ===================== MAP =====================
 function setMapState(ready,msg){
+  // Day 탭은 항상 표시 (지도 유무와 무관)
+  const tabs=document.getElementById('map-day-tabs');
+  if(tabs) tabs.style.display='flex';
   document.getElementById('map-ui').style.display=ready?'block':'none';
+  // Day 탭은 map-ui 바깥에 있으므로 따로 처리
+  if(tabs) tabs.style.display='';
   const noKey=document.getElementById('map-no-key');
   noKey.style.display=ready?'none':'block';
   if(msg) noKey.innerHTML=msg;
@@ -1245,7 +1278,11 @@ function initKakaoMap(){
     const options={center:new kakao.maps.LatLng(37.5665,126.9780),level:7};
     kakaoMap=new kakao.maps.Map(container,options);
     setMapState(true);
-    setTimeout(()=>kakaoMap.relayout(),200);
+    setTimeout(function(){
+      kakaoMap.relayout();
+      renderMapDayTabs();
+      restoreMapPins();
+    },300);
   });
 }
 function loadKakaoMap(){
@@ -1280,7 +1317,13 @@ function searchMap(){
       mapPins.push(pin);
       // S에도 저장 (좌표+이름만)
       if(!S.mapPinsData) S.mapPinsData=[];
-      S.mapPinsData.push({name:place.place_name,lat,lng});
+  if(!S.dayRoutes) S.dayRoutes={};
+      // 현재 선택된 Day에 저장
+      const dayKey = currentMapDay==='all' ? 'all' : currentMapDay;
+      if(!S.dayRoutes) S.dayRoutes={};
+      if(!S.dayRoutes[dayKey]) S.dayRoutes[dayKey]={pins:[],hasRoute:false};
+      S.dayRoutes[dayKey].pins.push({name:place.place_name,lat,lng});
+      if(dayKey==='all') S.mapPinsData=S.dayRoutes[dayKey].pins;
       saveLocal();
       renderMapPins(); document.getElementById('map-search-inp').value='';
       showToast('📍 '+place.place_name+' 추가됨');
@@ -1309,26 +1352,31 @@ function renderMapPins(){
 function removePin(idx){
   mapPins[idx].marker.setMap(null);
   mapPins.splice(idx,1);
-  S.mapPinsData = mapPins.map(function(p){return {name:p.name,lat:p.lat,lng:p.lng};});
-  saveLocal();
+  syncPinsToState();
   updatePinMarkers();
   renderMapPins();
 }
 function movePinUp(idx){
   if(idx===0) return;
   const tmp=mapPins[idx]; mapPins[idx]=mapPins[idx-1]; mapPins[idx-1]=tmp;
-  S.mapPinsData = mapPins.map(function(p){return {name:p.name,lat:p.lat,lng:p.lng};});
-  saveLocal();
+  syncPinsToState();
   updatePinMarkers();
   renderMapPins();
 }
 function movePinDown(idx){
   if(idx===mapPins.length-1) return;
   const tmp=mapPins[idx]; mapPins[idx]=mapPins[idx+1]; mapPins[idx+1]=tmp;
-  S.mapPinsData = mapPins.map(function(p){return {name:p.name,lat:p.lat,lng:p.lng};});
-  saveLocal();
+  syncPinsToState();
   updatePinMarkers();
   renderMapPins();
+}
+function syncPinsToState(){
+  const key = currentMapDay==='all' ? 'all' : currentMapDay;
+  if(!S.dayRoutes) S.dayRoutes={};
+  if(!S.dayRoutes[key]) S.dayRoutes[key]={pins:[],hasRoute:false};
+  S.dayRoutes[key].pins = mapPins.map(function(p){return {name:p.name,lat:p.lat,lng:p.lng};});
+  if(key==='all') S.mapPinsData = S.dayRoutes[key].pins;
+  saveLocal();
 }
 function updatePinMarkers(){
   // 마커 번호 라벨 업데이트 (기존 마커 제거 후 재생성)
@@ -1345,24 +1393,96 @@ function updatePinMarkers(){
   });
 }
 function restoreMapPins(){
-  if(!kakaoMap||!S.mapPinsData||!S.mapPinsData.length) return;
-  mapPins=[];
-  S.mapPinsData.forEach(function(pd,i){
-    const pos=new kakao.maps.LatLng(pd.lat,pd.lng);
-    const marker=new kakao.maps.Marker({map:kakaoMap,position:pos});
-    const info=new kakao.maps.InfoWindow({content:'<div style="padding:4px 8px;font-size:11px;font-family:sans-serif">'+(i+1)+'. '+pd.name+'</div>'});
-    const pin={name:pd.name,lat:pd.lat,lng:pd.lng,marker,infoWindow:info};
-    marker.addListener('click',(function(p){return function(){p.infoWindow.open(kakaoMap,p.marker);};})(pin));
-    mapPins.push(pin);
-  });
-  renderMapPins();
+  if(!kakaoMap) return;
+  switchMapDay(currentMapDay);
 }
+function renderMapDayTabs(){
+  const tabsEl = document.getElementById('map-day-tabs');
+  if(!tabsEl) return;
+  const days = getDayGroups();
+  if(!days.length){ tabsEl.innerHTML=''; return; }
+  tabsEl.innerHTML='';
+  var allBtn=document.createElement('button');
+  allBtn.className='map-day-tab'+(currentMapDay==='all'?' active':'');
+  allBtn.textContent='전체';
+  allBtn.onclick=function(){switchMapDay('all');};
+  tabsEl.appendChild(allBtn);
+  days.forEach(function(d){
+    var btn=document.createElement('button');
+    btn.className='map-day-tab'+(currentMapDay===String(d.dayIdx)?' active':'');
+    btn.textContent=d.dayLabel;
+    btn.onclick=(function(idx){return function(){switchMapDay(idx);};})(d.dayIdx);
+    tabsEl.appendChild(btn);
+  });
+}
+
+function switchMapDay(dayKey){
+  currentMapDay = String(dayKey);
+  renderMapDayTabs();
+  // 현재 day의 핀 복원
+  mapPins.forEach(function(p){ if(p.marker) p.marker.setMap(null); });
+  mapPins = [];
+  clearPolylines();
+  const key = currentMapDay==='all' ? 'all' : currentMapDay;
+  const pinsData = key==='all'
+    ? (S.mapPinsData||[])
+    : ((S.dayRoutes&&S.dayRoutes[key]&&S.dayRoutes[key].pins)||[]);
+  if(pinsData.length && kakaoMap){
+    pinsData.forEach(function(pd,i){
+      const pos=new kakao.maps.LatLng(pd.lat,pd.lng);
+      const marker=new kakao.maps.Marker({map:kakaoMap,position:pos});
+      const info=new kakao.maps.InfoWindow({content:'<div style="padding:4px 8px;font-size:11px;font-family:sans-serif">'+(i+1)+'. '+pd.name+'</div>'});
+      const pin={name:pd.name,lat:pd.lat,lng:pd.lng,marker,infoWindow:info};
+      marker.addListener('click',(function(p){return function(){p.infoWindow.open(kakaoMap,p.marker);};})(pin));
+      mapPins.push(pin);
+    });
+    renderMapPins();
+    // 저장된 루트 복원
+    if(S.dayRoutes&&S.dayRoutes[key]&&S.dayRoutes[key].hasRoute){
+      drawRouteLines();
+    }
+  } else {
+    renderMapPins();
+  }
+}
+
+function clearPolylines(){
+  drawnPolylines.forEach(function(pl){ pl.setMap(null); });
+  drawnPolylines=[];
+}
+
+function drawRouteLines(){
+  if(!kakaoMap||mapPins.length<2) return;
+  clearPolylines();
+  const linePath=mapPins.map(function(p){return new kakao.maps.LatLng(p.lat,p.lng);});
+  const pl=new kakao.maps.Polyline({path:linePath,strokeWeight:4,strokeColor:'#c17f5a',strokeOpacity:.85,strokeStyle:'solid'});
+  pl.setMap(kakaoMap);
+  drawnPolylines.push(pl);
+  const bounds=new kakao.maps.LatLngBounds();
+  linePath.forEach(function(p){bounds.extend(p);});
+  kakaoMap.setBounds(bounds);
+}
+
 function drawRoute(){
   if(!kakaoMap||mapPins.length<2){ showToast('핀을 2개 이상 추가해야 루트를 그릴 수 있어요'); return; }
-  const linePath=mapPins.map(p=>new kakao.maps.LatLng(p.lat,p.lng));
-  new kakao.maps.Polyline({path:linePath,strokeWeight:4,strokeColor:'#c17f5a',strokeOpacity:.85,strokeStyle:'solid'}).setMap(kakaoMap);
-  const bounds=new kakao.maps.LatLngBounds(); linePath.forEach(p=>bounds.extend(p)); kakaoMap.setBounds(bounds);
-  showToast('🛣️ 루트가 그려졌어요!');
+  drawRouteLines();
+  // Day별 루트 저장
+  const key = currentMapDay==='all' ? 'all' : currentMapDay;
+  if(!S.dayRoutes) S.dayRoutes={};
+  if(!S.dayRoutes[key]) S.dayRoutes[key]={pins:[]};
+  S.dayRoutes[key].hasRoute=true;
+  S.dayRoutes[key].pins=mapPins.map(function(p){return {name:p.name,lat:p.lat,lng:p.lng};});
+  if(currentMapDay==='all') S.mapPinsData=S.dayRoutes[key].pins;
+  saveLocal();
+  showToast('🛣️ 루트가 저장됐어요!');
+}
+
+function clearRoute(){
+  clearPolylines();
+  const key = currentMapDay==='all' ? 'all' : currentMapDay;
+  if(S.dayRoutes&&S.dayRoutes[key]) S.dayRoutes[key].hasRoute=false;
+  saveLocal();
+  showToast('루트를 지웠어요');
 }
 
 // ===================== MEMO =====================
