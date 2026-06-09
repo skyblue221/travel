@@ -234,7 +234,23 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 /* 폴라로이드 내부 */
 .scrap-polaroid{background:#fff;padding:8px 8px 32px;border:1px solid #e8ddd0}
 .scrap-img{width:100%;aspect-ratio:1;object-fit:cover;display:block;background:var(--surface2)}
-.scrap-no-img{width:100%;aspect-ratio:1;background:linear-gradient(135deg,var(--surface2),var(--accent3));display:flex;align-items:center;justify-content:center;font-size:32px}
+.scrap-no-img{
+  width:100%;aspect-ratio:1;
+  background:#fffdf7;
+  background-image: repeating-linear-gradient(transparent, transparent 23px, #e8ddd0 23px, #e8ddd0 24px);
+  display:flex;align-items:flex-start;justify-content:flex-start;
+  padding:10px 10px 10px 14px;
+  position:relative;overflow:hidden;
+}
+.scrap-no-img::before{
+  content:'';position:absolute;left:30px;top:0;bottom:0;width:1px;
+  background:rgba(255,180,180,.4);
+}
+.scrap-no-img-text{
+  font-size:11px;color:var(--text2);line-height:24px;
+  font-family:'Noto Serif KR',serif;word-break:break-all;
+  padding-left:16px;width:100%;text-align:left;
+}
 .scrap-caption{padding:6px 2px 0;text-align:center}
 .scrap-time-badge{font-size:9px;color:var(--accent);font-weight:500;margin-bottom:3px;letter-spacing:.04em}
 .scrap-comment-text{font-size:11px;color:var(--text2);line-height:1.5;font-family:'Noto Serif KR',serif;word-break:break-all}
@@ -1194,7 +1210,10 @@ function getDayGroups(){
     const withTime    = day.items.filter(function(i){return i.time&&i.time.trim();});
     const withoutTime = day.items.filter(function(i){return !i.time||!i.time.trim();});
     withTime.sort(function(a,b){
-      return a.time.replace(':','').localeCompare(b.time.replace(':',''));
+      // "8:05" → 805, "10:00" → 1000 으로 숫자 변환해서 비교
+      var ta=parseInt(a.time.replace(':',''),10)||0;
+      var tb=parseInt(b.time.replace(':',''),10)||0;
+      return ta-tb;
     });
     day.items = withTime.concat(withoutTime);
   });
@@ -1740,12 +1759,17 @@ function renderScrapbook(){
         polaroid.appendChild(img);
       } else {
         const ph=document.createElement('div');
-        ph.className='scrap-no-img'; ph.textContent=emojiList[i%6];
+        ph.className='scrap-no-img';
+        const txt=document.createElement('div');
+        txt.className='scrap-no-img-text';
+        txt.textContent=e.comment||'';
+        ph.appendChild(txt);
         polaroid.appendChild(ph);
       }
       const caption=document.createElement('div'); caption.className='scrap-caption';
       if(e.time){ const t=document.createElement('div'); t.className='scrap-time-badge'; t.textContent='⏰ '+e.time; caption.appendChild(t); }
-      if(e.comment){ const c=document.createElement('div'); c.className='scrap-comment-text'; c.textContent=e.comment; caption.appendChild(c); }
+      // 사진 있을 때만 caption에 comment (없을 때는 메모지 안에 표시됨)
+      if(e.photoData && e.comment){ const c=document.createElement('div'); c.className='scrap-comment-text'; c.textContent=e.comment; caption.appendChild(c); }
       polaroid.appendChild(caption);
       const delBtn=document.createElement('button'); delBtn.className='scrap-del-btn'; delBtn.textContent='×';
       delBtn.onclick=(function(eid){ return function(){ deleteDiaryEntry(eid); }; })(e.id);
