@@ -788,7 +788,18 @@ async function loadTripsFromSupabase(){
         createdAt: local.createdAt||''
       };
     });
-    saveTrips(); // 로컬 캐시도 업데이트
+    saveTrips();
+    // 현재 열려있는 여행이면 날짜도 즉시 반영
+    if(currentTripId){
+      const cur = trips.find(function(t){ return t.id===currentTripId; });
+      if(cur){
+        if(cur.dateStart) S.settings.dateStart = cur.dateStart;
+        if(cur.dateEnd)   S.settings.dateEnd   = cur.dateEnd;
+        document.getElementById('date-start').value = S.settings.dateStart||'';
+        document.getElementById('date-end').value   = S.settings.dateEnd||'';
+        updateDday();
+      }
+    }
     renderTripList();
   } catch(e){
     console.error('Supabase trips load error:', e);
@@ -882,7 +893,11 @@ function openTrip(id){
     localStorage.setItem(STORAGE_KEYS.kakaoKey, trip.kakaoKey);
   }
   loadTripState(id);
-  S.settings.members=trip.members||'min'; S.settings.tripName=trip.name;
+  S.settings.members=trip.members||'min';
+  S.settings.tripName=trip.name;
+  // trips에 저장된 날짜를 S.settings에 반영
+  if(trip.dateStart) S.settings.dateStart=trip.dateStart;
+  if(trip.dateEnd)   S.settings.dateEnd=trip.dateEnd;
   document.getElementById('home-screen').classList.add('hidden');
   applySettings(); renderAll();
   fetchData(); // Supabase에서 데이터 로드
@@ -964,6 +979,12 @@ async function fetchData(){
     S.schedule  = (schedule||[]).map(function(r){ return {id:r.id,dayIdx:r.day_idx,dayLabel:r.day_label,date:r.date,time:r.time,content:r.content,cat:r.cat}; });
     S.memos     = (memos||[]).map(function(r){ return {id:r.id,title:r.title,body:r.body,createdAt:r.created_at}; });
     S.expenses  = (expenses||[]).map(function(r){ return {id:r.id,payer:r.payer,cat:r.cat,desc:r.description,amount:r.amount}; });
+    // trips에 저장된 날짜를 S.settings에 반영 (날짜 초기화 방지)
+    const trip = trips.find(function(t){ return t.id===tripId; });
+    if(trip){
+      if(trip.dateStart && !S.settings.dateStart) S.settings.dateStart = trip.dateStart;
+      if(trip.dateEnd   && !S.settings.dateEnd)   S.settings.dateEnd   = trip.dateEnd;
+    }
     saveLocal(); renderAll(); setSyncStatus('ok');
   } catch(e){ console.error(e); setSyncStatus('err'); }
 }
