@@ -94,21 +94,21 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 
 /* WISH */
 .wish-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
-.wish-col{background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden}
+.wish-col{background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;min-width:0}
 .wish-col-header{padding:10px 12px;background:var(--surface2);font-size:12px;font-weight:500;color:var(--text)}
 .wish-items{padding:6px}
 .wish-item{display:flex;align-items:center;gap:7px;padding:7px 8px;border-radius:8px;font-size:12px;cursor:pointer;transition:background .15s;user-select:none;min-width:0}
 .wish-item:hover{background:var(--surface2)}
 .wish-check{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;transition:all .2s}
 .wish-item.done .wish-check{background:var(--accent2);border-color:var(--accent2);color:white}
-.wish-item span{flex:1;min-width:0;word-break:break-all;line-height:1.4}
+.wish-item span{flex:1;min-width:0;word-break:break-word;line-height:1.4;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .wish-item.done span{text-decoration:line-through;color:var(--text3)}
 .wish-del{margin-left:auto;color:var(--text3);font-size:14px;opacity:0}
 .wish-item:hover .wish-del{opacity:1}
-.add-wish-row{display:flex;gap:5px;padding:6px;border-top:1px solid var(--border)}
+.add-wish-row{display:flex;gap:5px;padding:6px;border-top:1px solid var(--border);align-items:center}
 .add-wish-input{flex:1;border:1px solid var(--border);border-radius:7px;padding:6px 8px;font-size:12px;font-family:inherit;outline:none;color:var(--text);background:var(--bg)}
 .add-wish-input:focus{border-color:var(--accent2)}
-.add-wish-btn{background:var(--accent2);color:white;border:none;border-radius:7px;padding:6px 10px;font-size:12px;cursor:pointer}
+.add-wish-btn{background:var(--accent2);color:white;border:none;border-radius:7px;padding:6px 10px;font-size:12px;cursor:pointer;flex-shrink:0;line-height:1}
 .progress-wrap{margin-bottom:16px}
 .progress-label{display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:5px}
 .progress-bar{height:5px;background:var(--surface2);border-radius:10px;overflow:hidden}
