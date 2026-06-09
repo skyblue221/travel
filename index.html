@@ -97,10 +97,11 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 .wish-col{background:var(--surface);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden}
 .wish-col-header{padding:10px 12px;background:var(--surface2);font-size:12px;font-weight:500;color:var(--text)}
 .wish-items{padding:6px}
-.wish-item{display:flex;align-items:center;gap:7px;padding:7px 8px;border-radius:8px;font-size:12px;cursor:pointer;transition:background .15s;user-select:none}
+.wish-item{display:flex;align-items:center;gap:7px;padding:7px 8px;border-radius:8px;font-size:12px;cursor:pointer;transition:background .15s;user-select:none;min-width:0}
 .wish-item:hover{background:var(--surface2)}
 .wish-check{width:15px;height:15px;border-radius:50%;border:1.5px solid var(--border);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;transition:all .2s}
 .wish-item.done .wish-check{background:var(--accent2);border-color:var(--accent2);color:white}
+.wish-item span{flex:1;min-width:0;word-break:break-all;line-height:1.4}
 .wish-item.done span{text-decoration:line-through;color:var(--text3)}
 .wish-del{margin-left:auto;color:var(--text3);font-size:14px;opacity:0}
 .wish-item:hover .wish-del{opacity:1}
@@ -689,6 +690,18 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
   </div>
 </div>
 
+<!-- CONFIRM MODAL -->
+<div class="modal-backdrop" id="confirm-modal">
+  <div class="modal" style="padding-bottom:28px">
+    <div class="modal-title" id="confirm-title">삭제하시겠어요?</div>
+    <div id="confirm-msg" style="font-size:13px;color:var(--text2);margin-bottom:4px;line-height:1.6"></div>
+    <div class="modal-btns" style="margin-top:20px">
+      <button class="modal-cancel" onclick="confirmResolve(false)">취소</button>
+      <button class="modal-save" style="background:#e07070" onclick="confirmResolve(true)">삭제</button>
+    </div>
+  </div>
+</div>
+
 <!-- TOAST (섹션 바깥, body 직계 자식) -->
 <div class="save-toast" id="toast"></div>
 
@@ -872,9 +885,10 @@ function loadTripState(id){
   try{ const d=localStorage.getItem('tp-state-'+id); if(d) S=JSON.parse(d); else resetState(); }catch(e){ resetState(); }
   if(!S.diary) S.diary=[];
   if(!S.expenses) S.expenses=[];
+  if(!S.mapPinsData) S.mapPinsData=[];
 }
 function saveTripState(id){ localStorage.setItem('tp-state-'+id,JSON.stringify(S)); }
-function resetState(){ S={wish:[],checklist:[],schedule:[],memos:[],diary:[],expenses:[],settings:{tripName:'',dateStart:'',dateEnd:'',members:'min,송송이'}}; }
+function resetState(){ S={wish:[],checklist:[],schedule:[],memos:[],diary:[],expenses:[],mapPinsData:[],settings:{tripName:'',dateStart:'',dateEnd:'',members:'min,송송이'}}; }
 function saveLocal(){ if(currentTripId) saveTripState(currentTripId); }
 
 // ===================== SYNC =====================
@@ -1079,8 +1093,13 @@ function showTab(name,el){
     } else if(!kakaoMap){
       loadKakaoMap();
     } else {
-      // 이미 지도가 있으면 섹션이 완전히 보인 후 relayout
-      setTimeout(function(){ kakaoMap.relayout(); },100);
+      setTimeout(function(){
+        kakaoMap.relayout();
+        // 저장된 핀 복원 (지도는 있는데 핀이 없을 때)
+        if(mapPins.length===0 && S.mapPinsData && S.mapPinsData.length){
+          restoreMapPins();
+        }
+      },100);
     }
   }
   if(name==='diary') populateDiaryDaySelect();
@@ -1102,7 +1121,13 @@ async function toggleWish(id){
   item.done=!item.done; renderWish();
   await postData({action:'updateRow',sheet:'위시리스트',id,field:'done',value:String(item.done)});
 }
-async function deleteWish(id){ S.wish=S.wish.filter(w=>w.id!==id); renderWish(); await postData({action:'deleteRow',sheet:'위시리스트',id}); }
+async function deleteWish(id){
+  const item=S.wish.find(w=>w.id===id); if(!item) return;
+  const ok=await showConfirm('삭제하시겠어요?', '"'+item.text+'"을(를) 삭제해요.');
+  if(!ok) return;
+  S.wish=S.wish.filter(w=>w.id!==id); renderWish();
+  await postData({action:'deleteRow',sheet:'위시리스트',id});
+}
 function renderWish(){
   ['place','do'].forEach(type=>{
     const list=document.getElementById('wish-'+type+'-list');
@@ -1121,7 +1146,13 @@ async function addCheckItem(){
   renderChecklist(); await postData({action:'addRow',sheet:'체크리스트',row});
 }
 async function toggleCheck(id){ const item=S.checklist.find(c=>c.id===id); if(!item) return; item.checked=!item.checked; renderChecklist(); await postData({action:'updateRow',sheet:'체크리스트',id,field:'checked',value:String(item.checked)}); }
-async function deleteCheck(id){ S.checklist=S.checklist.filter(c=>c.id!==id); renderChecklist(); await postData({action:'deleteRow',sheet:'체크리스트',id}); }
+async function deleteCheck(id){
+  const item=S.checklist.find(c=>c.id===id); if(!item) return;
+  const ok=await showConfirm('삭제하시겠어요?', '"'+item.text+'"을(를) 삭제해요.');
+  if(!ok) return;
+  S.checklist=S.checklist.filter(c=>c.id!==id); renderChecklist();
+  await postData({action:'deleteRow',sheet:'체크리스트',id});
+}
 function filterCheck(cat,el){ checkFilter=cat; document.querySelectorAll('#sec-checklist .chip').forEach(c=>c.classList.remove('active')); el.classList.add('active'); renderChecklist(); }
 function renderChecklist(){
   const cats=['준비물','예약','기타'], icons={'준비물':'🎒','예약':'🏨','기타':'📌'};
@@ -1160,7 +1191,13 @@ async function addSchedItem(dayIdx){
   S.schedule.push({...row,dayIdx}); te.value=''; ce.value=''; renderSchedule();
   await postData({action:'addRow',sheet:'일정',row});
 }
-async function deleteSchedItem(id){ S.schedule=S.schedule.filter(s=>s.id!==id); renderSchedule(); await postData({action:'deleteRow',sheet:'일정',id}); }
+async function deleteSchedItem(id){
+  const item=S.schedule.find(s=>s.id===id); if(!item) return;
+  const ok=await showConfirm('삭제하시겠어요?', '"'+item.content+'"을(를) 삭제해요.');
+  if(!ok) return;
+  S.schedule=S.schedule.filter(s=>s.id!==id); renderSchedule();
+  await postData({action:'deleteRow',sheet:'일정',id});
+}
 const catMap={'식사':'cat-meal','이동':'cat-move','관광':'cat-see','숙소':'cat-stay','기타':'cat-etc'};
 function renderSchedule(){
   const container=document.getElementById('schedule-container'), days=getDayGroups();
@@ -1241,6 +1278,10 @@ function searchMap(){
       const pin={name:place.place_name,lat,lng,marker,infoWindow:info};
       marker.addListener('click',(function(p){ return function(){ p.infoWindow.open(kakaoMap,p.marker); }; })(pin));
       mapPins.push(pin);
+      // S에도 저장 (좌표+이름만)
+      if(!S.mapPinsData) S.mapPinsData=[];
+      S.mapPinsData.push({name:place.place_name,lat,lng});
+      saveLocal();
       renderMapPins(); document.getElementById('map-search-inp').value='';
       showToast('📍 '+place.place_name+' 추가됨');
     } else showToast('장소를 찾을 수 없어요 😢');
@@ -1268,18 +1309,24 @@ function renderMapPins(){
 function removePin(idx){
   mapPins[idx].marker.setMap(null);
   mapPins.splice(idx,1);
+  S.mapPinsData = mapPins.map(function(p){return {name:p.name,lat:p.lat,lng:p.lng};});
+  saveLocal();
   updatePinMarkers();
   renderMapPins();
 }
 function movePinUp(idx){
   if(idx===0) return;
   const tmp=mapPins[idx]; mapPins[idx]=mapPins[idx-1]; mapPins[idx-1]=tmp;
+  S.mapPinsData = mapPins.map(function(p){return {name:p.name,lat:p.lat,lng:p.lng};});
+  saveLocal();
   updatePinMarkers();
   renderMapPins();
 }
 function movePinDown(idx){
   if(idx===mapPins.length-1) return;
   const tmp=mapPins[idx]; mapPins[idx]=mapPins[idx+1]; mapPins[idx+1]=tmp;
+  S.mapPinsData = mapPins.map(function(p){return {name:p.name,lat:p.lat,lng:p.lng};});
+  saveLocal();
   updatePinMarkers();
   renderMapPins();
 }
@@ -1296,6 +1343,19 @@ function updatePinMarkers(){
     p.infoWindow = info;
     p.marker.addListener('click', (function(pin){ return function(){ pin.infoWindow.open(kakaoMap, pin.marker); }; })(p));
   });
+}
+function restoreMapPins(){
+  if(!kakaoMap||!S.mapPinsData||!S.mapPinsData.length) return;
+  mapPins=[];
+  S.mapPinsData.forEach(function(pd,i){
+    const pos=new kakao.maps.LatLng(pd.lat,pd.lng);
+    const marker=new kakao.maps.Marker({map:kakaoMap,position:pos});
+    const info=new kakao.maps.InfoWindow({content:'<div style="padding:4px 8px;font-size:11px;font-family:sans-serif">'+(i+1)+'. '+pd.name+'</div>'});
+    const pin={name:pd.name,lat:pd.lat,lng:pd.lng,marker,infoWindow:info};
+    marker.addListener('click',(function(p){return function(){p.infoWindow.open(kakaoMap,p.marker);};})(pin));
+    mapPins.push(pin);
+  });
+  renderMapPins();
 }
 function drawRoute(){
   if(!kakaoMap||mapPins.length<2){ showToast('핀을 2개 이상 추가해야 루트를 그릴 수 있어요'); return; }
@@ -1315,7 +1375,13 @@ async function saveMemo(){
   const row={id:genId(),title,body,createdAt:now}; S.memos.unshift(row); closeMemo(); renderMemos();
   await postData({action:'addRow',sheet:'메모',row});
 }
-async function deleteMemo(id){ S.memos=S.memos.filter(m=>m.id!==id); renderMemos(); await postData({action:'deleteRow',sheet:'메모',id}); }
+async function deleteMemo(id){
+  const item=S.memos.find(m=>m.id===id); if(!item) return;
+  const ok=await showConfirm('삭제하시겠어요?', '"'+item.title+'" 메모를 삭제해요.');
+  if(!ok) return;
+  S.memos=S.memos.filter(m=>m.id!==id); renderMemos();
+  await postData({action:'deleteRow',sheet:'메모',id});
+}
 function renderMemos(){
   document.getElementById('memo-count').textContent=`메모 ${S.memos.length}개`;
   const list=document.getElementById('memo-list');
@@ -1336,11 +1402,21 @@ function addExpense(){
   const desc=document.getElementById('exp-desc').value.trim();
   const amount=parseInt(document.getElementById('exp-amount').value)||0;
   if(!desc||!amount){ showToast('내용과 금액을 입력해주세요'); return; }
-  S.expenses.push({id:genId(),payer,cat,desc,amount});
+  const row={id:genId(),payer,cat,desc,amount};
+  S.expenses.push(row);
   document.getElementById('exp-desc').value=''; document.getElementById('exp-amount').value='';
   saveLocal(); renderBudget();
+  // Supabase 저장
+  postData({action:'addRow',sheet:'예산',row:{id:row.id,payer:row.payer,cat:row.cat,desc:row.desc,amount:row.amount}});
 }
-function deleteExpense(id){ S.expenses=S.expenses.filter(e=>e.id!==id); saveLocal(); renderBudget(); }
+async function deleteExpense(id){
+  const item=S.expenses.find(e=>e.id===id); if(!item) return;
+  const ok=await showConfirm('삭제하시겠어요?', '"'+item.desc+'" ('+item.amount.toLocaleString('ko-KR')+'원)을 삭제해요.');
+  if(!ok) return;
+  S.expenses=S.expenses.filter(e=>e.id!==id);
+  saveLocal(); renderBudget();
+  postData({action:'deleteRow',sheet:'예산',id:id});
+}
 function renderBudget(){
   if(!S.expenses) S.expenses=[];
   const total=S.expenses.reduce((s,e)=>s+e.amount,0);
@@ -1650,6 +1726,23 @@ function renderAll(){
 }
 
 // ===================== TOAST =====================
+// ── 커스텀 confirm 팝업 ──
+let confirmResolve = null;
+function showConfirm(title, msg){
+  return new Promise(function(resolve){
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-msg').textContent = msg||'';
+    document.getElementById('confirm-modal').classList.add('open');
+    confirmResolve = function(result){
+      document.getElementById('confirm-modal').classList.remove('open');
+      resolve(result);
+    };
+  });
+}
+document.getElementById('confirm-modal').addEventListener('click', function(e){
+  if(e.target===document.getElementById('confirm-modal')) confirmResolve(false);
+});
+
 function showToast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'),2200);
