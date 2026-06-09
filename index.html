@@ -555,8 +555,8 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
     <div id="map-container"><div id="map"></div></div>
     <div class="map-pins" id="map-pins"></div>
     <div style="display:flex;gap:8px;margin-top:8px">
-      <button class="map-route-btn" style="flex:1" onclick="drawRoute()">🛣️ 루트 그리기</button>
-      <button class="map-route-btn" style="flex:0 0 auto;padding:10px 14px" onclick="clearRoute()" title="루트 지우기">🗑️</button>
+      <button class="map-route-btn" style="flex:3;white-space:nowrap" onclick="drawRoute()">🛣️ 루트 그리기</button>
+      <button class="map-route-btn" style="flex:1;white-space:nowrap" onclick="clearRoute()">🗑️ 루트 지우기</button>
     </div>
   </div>
   <div class="map-no-key hidden" id="map-no-key" style="display:none">
@@ -1208,12 +1208,62 @@ async function addDay(){
   await postData({action:'addRow',sheet:'일정',row});
 }
 async function addSchedItem(dayIdx){
-  const dayIdxN=Number(dayIdx); const te=document.getElementById('st-'+dayIdxN), ce=document.getElementById('sc-'+dayIdxN), ke=document.getElementById('sk-'+dayIdxN);
+  const dayIdxN=Number(dayIdx);
+  const te=document.getElementById('st-'+dayIdxN);
+  const ce=document.getElementById('sc-'+dayIdxN);
+  const ke=document.getElementById('sk-'+dayIdxN);
   const content=ce.value.trim(); if(!content) return;
-  const days=getDayGroups(), day=days.find(d=>d.dayIdx===dayIdx);
-  const row={id:genId(),dayIdx:String(dayIdx),dayLabel:day?.dayLabel||`Day ${dayIdx+1}`,date:day?.date||'',time:te.value.trim(),content,cat:ke.value};
-  S.schedule.push({...row,dayIdx}); te.value=''; ce.value=''; renderSchedule();
+  const days=getDayGroups(), day=days.find(function(d){return d.dayIdx===dayIdx;});
+  const row={id:genId(),dayIdx:String(dayIdx),dayLabel:day?day.dayLabel:'Day '+(dayIdx+1),date:day?day.date:'',time:te.value.trim(),content,cat:ke.value};
+  S.schedule.push(Object.assign({},row,{dayIdx:dayIdx}));
+  te.value=''; ce.value=''; renderSchedule();
   await postData({action:'addRow',sheet:'일정',row});
+  // 카카오맵에 장소 자동 검색 (관광/식사 카테고리 또는 장소처럼 보이는 내용)
+  if(kakaoMap && ke.value !== '이동') {
+    autoAddMapPin(content, dayIdx);
+  }
+}
+
+function autoAddMapPin(query, dayIdx){
+  if(!window.kakao||!kakao.maps||!kakao.maps.services) return;
+  const ps = new kakao.maps.services.Places();
+  // 지역 + 키워드로 검색
+  const tripName = S.settings.tripName||'';
+  const searchQuery = tripName ? tripName+' '+query : query;
+  ps.keywordSearch(searchQuery, function(data, status){
+    if(status!==kakao.maps.services.Status.OK||!data.length){
+      // 지역 없이 재검색
+      ps.keywordSearch(query, function(data2, status2){
+        if(status2===kakao.maps.services.Status.OK&&data2.length){
+          addPinForDay(data2[0], dayIdx, query);
+        }
+      });
+      return;
+    }
+    addPinForDay(data[0], dayIdx, query);
+  });
+}
+
+function addPinForDay(place, dayIdx, label){
+  if(!kakaoMap) return;
+  const lat=parseFloat(place.y), lng=parseFloat(place.x);
+  const pos=new kakao.maps.LatLng(lat,lng);
+  const marker=new kakao.maps.Marker({map:kakaoMap,position:pos});
+  const dayKey=String(dayIdx);
+  if(!S.dayRoutes) S.dayRoutes={};
+  if(!S.dayRoutes[dayKey]) S.dayRoutes[dayKey]={pins:[],hasRoute:false};
+  const pinNum=S.dayRoutes[dayKey].pins.length+1;
+  const info=new kakao.maps.InfoWindow({content:'<div style="padding:4px 8px;font-size:11px;font-family:sans-serif">'+pinNum+'. '+place.place_name+'</div>'});
+  const pin={name:place.place_name,lat,lng,marker,infoWindow:info};
+  marker.addListener('click',(function(p){return function(){p.infoWindow.open(kakaoMap,p.marker);};})(pin));
+  S.dayRoutes[dayKey].pins.push({name:place.place_name,lat,lng});
+  saveLocal();
+  // 현재 지도에 해당 Day가 선택돼 있으면 핀 목록 갱신
+  if(currentMapDay===dayKey||currentMapDay==='all'){
+    mapPins.push(pin);
+    renderMapPins();
+  }
+  showToast('📍 '+place.place_name+' 지도에 추가됐어요!');
 }
 async function deleteSchedItem(id){
   const item=S.schedule.find(s=>s.id===id); if(!item) return;
@@ -1636,7 +1686,13 @@ function addDiaryEntry(){
   renderDiary();
   showToast('📸 순간이 추가됐어요!');
 }
-function deleteDiaryEntry(id){ S.diary=S.diary.filter(e=>e.id!==id); saveLocal(); renderDiary(); }
+async function deleteDiaryEntry(id){
+  const item=S.diary.find(e=>e.id===id); if(!item) return;
+  const label=item.comment?'"'+item.comment.slice(0,15)+(item.comment.length>15?'...':'')+'"':'이 순간';
+  const ok=await showConfirm('삭제하시겠어요?', label+'을(를) 삭제해요.');
+  if(!ok) return;
+  S.diary=S.diary.filter(e=>e.id!==id); saveLocal(); renderDiary();
+}
 function renderDiary(){
   if(!S.diary) S.diary=[];
   populateDiaryDaySelect();
