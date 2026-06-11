@@ -153,6 +153,8 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 .add-sched-row{display:flex;gap:5px}
 .sched-input{flex:1;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;font-family:inherit;outline:none;background:var(--bg);color:var(--text)}
 .sched-input:focus{border-color:var(--accent)}
+.schedule-content-wrap{display:flex;flex-direction:column;flex:1;min-width:0;gap:2px}
+.schedule-place{font-size:10px;color:var(--accent2);font-weight:500}
 .sched-btn{background:var(--accent);color:white;border:none;border-radius:7px;padding:7px 11px;font-size:12px;cursor:pointer;white-space:nowrap}
 .add-day-btn{width:100%;background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--radius);padding:13px;font-size:13px;color:var(--text3);cursor:pointer;font-family:inherit;transition:all .2s}
 .add-day-btn:hover{border-color:var(--accent);color:var(--accent)}
@@ -976,7 +978,7 @@ async function fetchData(){
     // Supabase 컬럼명 → 앱 필드명 매핑
     S.wish      = (wish||[]).map(function(r){ return {id:r.id,type:r.type,text:r.text,done:r.done}; });
     S.checklist = (checklist||[]).map(function(r){ return {id:r.id,cat:r.cat,text:r.text,checked:r.checked}; });
-    S.schedule  = (schedule||[]).map(function(r){ return {id:r.id,dayIdx:r.day_idx,dayLabel:r.day_label,date:r.date,time:r.time,content:r.content,cat:r.cat}; });
+    S.schedule  = (schedule||[]).map(function(r){ return {id:r.id,dayIdx:r.day_idx,dayLabel:r.day_label,date:r.date,time:r.time,content:r.content,place:r.place||'',cat:r.cat}; });
     S.memos     = (memos||[]).map(function(r){ return {id:r.id,title:r.title,body:r.body,createdAt:r.created_at}; });
     S.expenses  = (expenses||[]).map(function(r){ return {id:r.id,payer:r.payer,cat:r.cat,desc:r.description,amount:r.amount}; });
     // trips에 저장된 날짜를 S.settings에 반영 (날짜 초기화 방지)
@@ -1020,7 +1022,7 @@ async function postData(payload){
       let row = { id: r.id, trip_id: tripId };
       if(table==='wish')      { row.type=r.type; row.text=r.text; row.done=r.done==='true'||r.done===true; }
       if(table==='checklist') { row.cat=r.cat; row.text=r.text; row.checked=r.checked==='true'||r.checked===true; }
-      if(table==='schedule')  { row.day_idx=Number(r.dayIdx); row.day_label=r.dayLabel; row.date=r.date; row.time=r.time; row.content=r.content; row.cat=r.cat; }
+      if(table==='schedule')  { row.day_idx=Number(r.dayIdx); row.day_label=r.dayLabel; row.date=r.date; row.time=r.time; row.content=r.content; row.place=r.place||''; row.cat=r.cat; }
       if(table==='memos')     { row.title=r.title; row.body=r.body; }
       if(table==='expenses')  { row.payer=r.payer; row.cat=r.cat; row.description=r.desc; row.amount=Number(r.amount); }
       await sbFetch(table, 'POST', row);
@@ -1251,16 +1253,18 @@ async function addSchedItem(dayIdx){
   const dayIdxN=Number(dayIdx);
   const te=document.getElementById('st-'+dayIdxN);
   const ce=document.getElementById('sc-'+dayIdxN);
+  const pe=document.getElementById('sp-'+dayIdxN);
   const ke=document.getElementById('sk-'+dayIdxN);
   const content=ce.value.trim(); if(!content) return;
+  const place=(pe?pe.value.trim():'');
   const days=getDayGroups(), day=days.find(function(d){return d.dayIdx===dayIdx;});
-  const row={id:genId(),dayIdx:String(dayIdx),dayLabel:day?day.dayLabel:'Day '+(dayIdx+1),date:day?day.date:'',time:te.value.trim(),content,cat:ke.value};
+  const row={id:genId(),dayIdx:String(dayIdx),dayLabel:day?day.dayLabel:'Day '+(dayIdx+1),date:day?day.date:'',time:te.value.trim(),content,place,cat:ke.value};
   S.schedule.push(Object.assign({},row,{dayIdx:dayIdx}));
-  te.value=''; ce.value=''; renderSchedule();
+  te.value=''; ce.value=''; if(pe) pe.value=''; renderSchedule();
   await postData({action:'addRow',sheet:'일정',row});
-  // 카카오맵에 장소 자동 검색 (관광/식사 카테고리 또는 장소처럼 보이는 내용)
-  if(kakaoMap && ke.value !== '이동') {
-    autoAddMapPin(content, dayIdx);
+  // 장소 필드가 있을 때만 지도에 자동 추가
+  if(place && kakaoMap){
+    autoAddMapPin(place, dayIdx);
   }
 }
 
@@ -1330,7 +1334,10 @@ function renderSchedule(){
     visItems.forEach(function(item){
       h+='<div class="schedule-item">';
       h+='<span class="schedule-time">'+(item.time||'──')+'</span>';
+      h+='<div class="schedule-content-wrap">';
       h+='<span class="schedule-content">'+item.content+'</span>';
+      if(item.place){ h+='<span class="schedule-place">📍 '+item.place+'</span>'; }
+      h+='</div>';
       h+='<span class="schedule-category '+(catMap[item.cat]||'cat-etc')+'">'+item.cat+'</span>';
       h+='<span style="font-size:12px;color:var(--text3);cursor:pointer;padding:0 4px" onclick="deleteSchedItem(\''+item.id+'\')">×</span>';
       h+='</div>';
@@ -1340,6 +1347,8 @@ function renderSchedule(){
     h+='<div class="add-sched-row">';
     h+='<input class="sched-input" id="st-'+day.dayIdx+'" placeholder="시간" style="flex:0 0 70px">';
     h+='<input class="sched-input" id="sc-'+day.dayIdx+'" placeholder="일정 내용" onkeydown="if(event.key===\'Enter\')addSchedItem('+day.dayIdx+')">';
+    h+='</div><div class="add-sched-row">';
+    h+='<input class="sched-input" id="sp-'+day.dayIdx+'" placeholder="📍 장소 (선택, 지도에 자동 추가)" style="flex:2">';
     h+='</div><div class="add-sched-row">';
     h+='<select class="sched-input" id="sk-'+day.dayIdx+'" style="flex:0 0 80px"><option>식사</option><option>이동</option><option>관광</option><option>숙소</option><option>기타</option></select>';
     h+='<button class="sched-btn" onclick="addSchedItem('+day.dayIdx+')">+ 추가</button>';
