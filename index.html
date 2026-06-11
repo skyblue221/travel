@@ -1298,38 +1298,76 @@ function onPlaceInput(dayIdx, val){
   const dd = document.getElementById('pd-'+dayIdx);
   if(!val.trim()){ if(dd) dd.style.display='none'; return; }
   placeSearchTimer[dayIdx] = setTimeout(function(){
-    searchPlaceREST(dayIdx, val);
+    searchPlaceSDK(dayIdx, val);
   }, 350);
 }
 
-async function searchPlaceREST(dayIdx, val){
+function searchPlaceSDK(dayIdx, val){
   const dd = document.getElementById('pd-'+dayIdx);
   if(!dd) return;
-  try{
-    const tripName = S.settings.tripName||'';
-    const q = encodeURIComponent(tripName ? tripName+' '+val : val);
-    const res = await fetch(
-      'https://dapi.kakao.com/v2/local/search/keyword.json?query='+q+'&size=5',
-      { headers: { 'Authorization': 'KakaoAK '+CFG.kakaoRestKey } }
-    );
-    const json = await res.json();
-    const data = json.documents||[];
-    if(!data.length){
-      dd.innerHTML='<div class="place-dropdown-empty">검색 결과가 없어요</div>';
-      dd.style.display='block'; return;
-    }
-    dd.innerHTML = data.map(function(p,i){
-      return '<div class="place-dropdown-item" onmousedown="selectPlace('+dayIdx+','+i+',event)">'
-        + '<div class="place-name">'+p.place_name+'</div>'
-        + '<div class="place-addr">'+(p.road_address_name||p.address_name||'')+'</div>'
-        + '</div>';
-    }).join('');
-    dd._searchData = data;
-    dd.style.display='block';
-  } catch(e){
-    dd.innerHTML='<div class="place-dropdown-empty">검색 오류가 났어요</div>';
-    dd.style.display='block';
+  // SDK가 아직 안 로드됐으면 먼저 로드
+  if(!window.kakao||!kakao.maps||!kakao.maps.services){
+    ensureKakaoServices(function(){
+      searchPlaceSDK(dayIdx, val);
+    });
+    return;
   }
+  const ps = new kakao.maps.services.Places();
+  const tripName = S.settings.tripName||'';
+  const q = tripName ? tripName+' '+val : val;
+  ps.keywordSearch(q, function(data, status){
+    if(status!==kakao.maps.services.Status.OK||!data.length){
+      // 지역명 없이 재검색
+      ps.keywordSearch(val, function(data2, status2){
+        if(status2===kakao.maps.services.Status.OK&&data2.length){
+          renderPlaceDropdown(dayIdx, data2);
+        } else {
+          dd.innerHTML='<div class="place-dropdown-empty">검색 결과가 없어요</div>';
+          dd.style.display='block';
+        }
+      },{size:5});
+      return;
+    }
+    renderPlaceDropdown(dayIdx, data);
+  },{size:5});
+}
+
+function renderPlaceDropdown(dayIdx, data){
+  const dd = document.getElementById('pd-'+dayIdx);
+  if(!dd) return;
+  dd.innerHTML = data.map(function(p,i){
+    return '<div class="place-dropdown-item" onmousedown="selectPlace('+dayIdx+','+i+',event)">'
+      + '<div class="place-name">'+p.place_name+'</div>'
+      + '<div class="place-addr">'+(p.road_address_name||p.address_name||'')+'</div>'
+      + '</div>';
+  }).join('');
+  dd._searchData = data;
+  dd.style.display='block';
+}
+
+// 카카오맵 SDK services만 미리 로드 (지도 없이)
+function ensureKakaoServices(callback){
+  if(window.kakao&&kakao.maps&&kakao.maps.services){
+    if(callback) callback(); return;
+  }
+  if(document.getElementById('kakao-script-services')){
+    // 이미 로딩 중 — 완료 후 콜백
+    const check = setInterval(function(){
+      if(window.kakao&&kakao.maps&&kakao.maps.services){
+        clearInterval(check); if(callback) callback();
+      }
+    }, 100);
+    return;
+  }
+  const script = document.createElement('script');
+  script.id = 'kakao-script-services';
+  script.src = 'https://dapi.kakao.com/v2/maps/sdk.js?appkey='+CFG.kakaoKey+'&libraries=services&autoload=false';
+  script.onload = function(){
+    kakao.maps.load(function(){
+      if(callback) callback();
+    });
+  };
+  document.head.appendChild(script);
 }
 
 function selectPlace(dayIdx, idx, e){
@@ -1360,30 +1398,23 @@ function focusPin(idx){
   if(p.infoWindow) p.infoWindow.open(kakaoMap, p.marker);
 }
 
-async function autoAddMapPin(query, dayIdx){
-  try{
+function autoAddMapPin(query, dayIdx){
+  ensureKakaoServices(function(){
+    const ps = new kakao.maps.services.Places();
     const tripName = S.settings.tripName||'';
-    const q = encodeURIComponent(tripName ? tripName+' '+query : query);
-    const res = await fetch(
-      'https://dapi.kakao.com/v2/local/search/keyword.json?query='+q+'&size=1',
-      { headers: { 'Authorization': 'KakaoAK '+CFG.kakaoRestKey } }
-    );
-    const json = await res.json();
-    if(json.documents&&json.documents.length){
-      addPinForDay(json.documents[0], dayIdx, query);
-    } else {
-      // 지역명 없이 재검색
-      const q2 = encodeURIComponent(query);
-      const res2 = await fetch(
-        'https://dapi.kakao.com/v2/local/search/keyword.json?query='+q2+'&size=1',
-        { headers: { 'Authorization': 'KakaoAK '+CFG.kakaoRestKey } }
-      );
-      const json2 = await res2.json();
-      if(json2.documents&&json2.documents.length){
-        addPinForDay(json2.documents[0], dayIdx, query);
+    const q = tripName ? tripName+' '+query : query;
+    ps.keywordSearch(q, function(data, status){
+      if(status===kakao.maps.services.Status.OK&&data.length){
+        addPinForDay(data[0], dayIdx, query);
+      } else {
+        ps.keywordSearch(query, function(data2, status2){
+          if(status2===kakao.maps.services.Status.OK&&data2.length){
+            addPinForDay(data2[0], dayIdx, query);
+          }
+        });
       }
-    }
-  } catch(e){ console.error('place search error:', e); }
+    },{size:1});
+  });
 }
 
 function addPinForDay(place, dayIdx, label){
@@ -2297,10 +2328,10 @@ function init(){
   const savedKakaoKey = localStorage.getItem(STORAGE_KEYS.kakaoKey);
   if(savedNotionKey) CFG.notionApiKey = savedNotionKey;
   if(savedKakaoKey) CFG.kakaoKey = savedKakaoKey;
-  // 로컬 캐시로 먼저 빠르게 표시
   loadTrips(); renderTripList();
-  // Supabase에서 최신 목록 불러와서 업데이트
   loadTripsFromSupabase();
+  // 카카오 SDK 백그라운드 미리 로드 (장소 검색 빠르게)
+  if(CFG.kakaoKey) ensureKakaoServices(null);
 }
 init();
 </script>
