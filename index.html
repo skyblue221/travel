@@ -591,9 +591,9 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
       <input class="map-search-input" id="map-search-inp" placeholder="장소 검색 (예: 경복궁, 성수동 카페)" onkeydown="if(event.key==='Enter')searchMap()">
       <button class="map-search-btn" onclick="searchMap()">검색</button>
     </div>
-    <!-- 검색 결과 목록 -->
-    <div id="map-search-results" style="display:none;margin-bottom:10px;border:1.5px solid var(--accent2);border-radius:10px;overflow:hidden;background:var(--surface)"></div>
     <div id="map-container"><div id="map"></div></div>
+    <!-- 검색 결과 목록 — 지도 아래에 표시 -->
+    <div id="map-search-results" style="display:none;margin-bottom:10px;border:1.5px solid var(--accent2);border-radius:10px;overflow:hidden;background:var(--surface);max-height:220px;overflow-y:auto"></div>
     <div class="map-pins" id="map-pins"></div>
     <div style="display:flex;gap:8px;margin-top:8px">
       <button class="map-route-btn" style="flex:3;white-space:nowrap" onclick="drawRoute()">🛣️ 루트 그리기</button>
@@ -1643,22 +1643,28 @@ function addMapPin(place){
 let pendingPinName = '';
 function openPinScheduleModal(placeName, category){
   const days = getDayGroups();
-  if(!days.length){ return; } // 일정 없으면 팝업 안 띄움
   pendingPinName = placeName;
   document.getElementById('pin-schedule-place-name').textContent = placeName;
-  // 카테고리에서 일정 카테고리 추측
   let guessedCat = '관광';
   if(category.includes('음식')||category.includes('식당')||category.includes('카페')) guessedCat='식사';
   else if(category.includes('숙박')) guessedCat='숙소';
   const list = document.getElementById('pin-schedule-day-list');
   list.innerHTML='';
-  days.forEach(function(d){
-    var btn=document.createElement('button');
-    btn.className='pin-day-btn';
-    btn.innerHTML='<span class="day-badge">'+d.dayLabel+'</span><span>'+(d.date||'날짜 미정')+'</span>';
-    btn.onclick=(function(idx,cat){return function(){addPinToSchedule(idx,cat);};})(d.dayIdx,guessedCat);
-    list.appendChild(btn);
-  });
+  if(!days.length){
+    // Day 없을 때 안내
+    const msg = document.createElement('div');
+    msg.style.cssText='padding:12px;font-size:13px;color:var(--text3);text-align:center;line-height:1.8';
+    msg.innerHTML='일정 탭에서 날짜(Day)를 먼저<br>추가하면 일정에 연결할 수 있어요 📅';
+    list.appendChild(msg);
+  } else {
+    days.forEach(function(d){
+      var btn=document.createElement('button');
+      btn.className='pin-day-btn';
+      btn.innerHTML='<span class="day-badge">'+d.dayLabel+'</span><span>'+(d.date||'날짜 미정')+'</span>';
+      btn.onclick=(function(idx,cat){return function(){addPinToSchedule(idx,cat);};})(d.dayIdx,guessedCat);
+      list.appendChild(btn);
+    });
+  }
   document.getElementById('pin-schedule-modal').classList.add('open');
 }
 
