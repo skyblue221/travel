@@ -165,6 +165,12 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 .place-dropdown-empty{padding:12px;font-size:12px;color:var(--text3);text-align:center}
 .map-pin-item{cursor:pointer}
 .map-pin-item:hover .map-pin-name{color:var(--accent)}
+.kakao-info-wrap{padding:10px 12px;font-family:'Noto Sans KR',sans-serif;min-width:200px;max-width:260px}
+.kakao-info-name{font-size:14px;font-weight:600;color:#333;margin-bottom:4px}
+.kakao-info-category{font-size:11px;color:#888;margin-bottom:6px}
+.kakao-info-addr{font-size:12px;color:#555;line-height:1.5;margin-bottom:4px}
+.kakao-info-phone{font-size:12px;color:#555;margin-bottom:8px}
+.kakao-info-link{display:inline-block;background:#FFCD00;color:#333;border-radius:4px;padding:4px 10px;font-size:11px;font-weight:500;text-decoration:none}
 .sched-btn{background:var(--accent);color:white;border:none;border-radius:7px;padding:7px 11px;font-size:12px;cursor:pointer;white-space:nowrap}
 .add-day-btn{width:100%;background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--radius);padding:13px;font-size:13px;color:var(--text3);cursor:pointer;font-family:inherit;transition:all .2s}
 .add-day-btn:hover{border-color:var(--accent);color:var(--accent)}
@@ -1416,6 +1422,22 @@ function focusPin(idx){
   if(p.infoWindow) p.infoWindow.open(kakaoMap, p.marker);
 }
 
+// ── 카카오 장소 상세 정보창 HTML 생성 ──
+function makePlaceInfoContent(place, pinNum){
+  const name = place.place_name||place.name||'';
+  const category = place.category_name||'';
+  const addr = place.road_address_name||place.address_name||'';
+  const phone = place.phone||'';
+  const url = place.place_url||('https://map.kakao.com/link/map/'+encodeURIComponent(name)+','+place.y+','+place.x);
+  return '<div class="kakao-info-wrap">'
+    + '<div class="kakao-info-name">'+pinNum+'. '+name+'</div>'
+    + (category?'<div class="kakao-info-category">'+category+'</div>':'')
+    + (addr?'<div class="kakao-info-addr">📍 '+addr+'</div>':'')
+    + (phone?'<div class="kakao-info-phone">📞 '+phone+'</div>':'')
+    + '<a class="kakao-info-link" href="'+url+'" target="_blank">카카오맵에서 보기</a>'
+    + '</div>';
+}
+
 function autoAddMapPin(query, dayIdx){
   ensureKakaoServices(function(){
     const ps = new kakao.maps.services.Places();
@@ -1444,10 +1466,11 @@ function addPinForDay(place, dayIdx, label){
   if(!S.dayRoutes) S.dayRoutes={};
   if(!S.dayRoutes[dayKey]) S.dayRoutes[dayKey]={pins:[],hasRoute:false};
   const pinNum=S.dayRoutes[dayKey].pins.length+1;
-  const info=new kakao.maps.InfoWindow({content:'<div style="padding:4px 8px;font-size:11px;font-family:sans-serif">'+pinNum+'. '+place.place_name+'</div>'});
-  const pin={name:place.place_name,lat,lng,marker,infoWindow:info};
+  const infoContent = makePlaceInfoContent(place, pinNum);
+  const info=new kakao.maps.InfoWindow({content:infoContent,removable:true});
+  const pin={name:place.place_name,lat,lng,marker,infoWindow:info,placeData:place};
   marker.addListener('click',(function(p){return function(){p.infoWindow.open(kakaoMap,p.marker);};})(pin));
-  S.dayRoutes[dayKey].pins.push({name:place.place_name,lat,lng});
+  S.dayRoutes[dayKey].pins.push({name:place.place_name,lat,lng,phone:place.phone||'',addr:place.road_address_name||place.address_name||'',url:place.place_url||'',category:place.category_name||''});
   saveLocal();
   // 현재 지도에 해당 Day가 선택돼 있으면 핀 목록 갱신
   if(currentMapDay===dayKey||currentMapDay==='all'){
@@ -1559,15 +1582,16 @@ function searchMap(){
       kakaoMap.setCenter(pos); kakaoMap.setLevel(4);
       const marker=new kakao.maps.Marker({map:kakaoMap,position:pos});
       const pinNum = mapPins.length+1;
-      const info=new kakao.maps.InfoWindow({content:'<div style="padding:4px 8px;font-size:11px;font-family:sans-serif">'+pinNum+'. '+place.place_name+'</div>'});
+      const infoContent2 = makePlaceInfoContent(place, pinNum);
+      const info=new kakao.maps.InfoWindow({content:infoContent2,removable:true});
       info.open(kakaoMap,marker);
-      const pin={name:place.place_name,lat,lng,marker,infoWindow:info};
+      const pin={name:place.place_name,lat,lng,marker,infoWindow:info,placeData:place};
       marker.addListener('click',(function(p){ return function(){ p.infoWindow.open(kakaoMap,p.marker); }; })(pin));
       mapPins.push(pin);
       const dayKey = currentMapDay==='all' ? 'all' : currentMapDay;
       if(!S.dayRoutes) S.dayRoutes={};
       if(!S.dayRoutes[dayKey]) S.dayRoutes[dayKey]={pins:[],hasRoute:false};
-      S.dayRoutes[dayKey].pins.push({name:place.place_name,lat,lng});
+      S.dayRoutes[dayKey].pins.push({name:place.place_name,lat,lng,phone:place.phone||'',addr:place.road_address_name||place.address_name||'',url:place.place_url||'',category:place.category_name||''});
       if(dayKey==='all') S.mapPinsData=S.dayRoutes[dayKey].pins;
       saveLocal();
       renderMapPins(); document.getElementById('map-search-inp').value='';
@@ -1720,21 +1744,34 @@ function switchMapDay(dayKey){
   mapPins = [];
   clearPolylines();
   const key = currentMapDay==='all' ? 'all' : currentMapDay;
-  const pinsData = key==='all'
-    ? (S.mapPinsData||[])
-    : ((S.dayRoutes&&S.dayRoutes[key]&&S.dayRoutes[key].pins)||[]);
+  // 전체 탭이면 모든 Day 핀 합치기
+  let pinsData = [];
+  if(key==='all'){
+    if(S.dayRoutes){
+      Object.keys(S.dayRoutes).forEach(function(dk){
+        if(dk!=='all' && S.dayRoutes[dk].pins){
+          S.dayRoutes[dk].pins.forEach(function(p){ pinsData.push(p); });
+        }
+      });
+    }
+    // dayRoutes에 없으면 mapPinsData 사용
+    if(!pinsData.length) pinsData = S.mapPinsData||[];
+  } else {
+    pinsData = (S.dayRoutes&&S.dayRoutes[key]&&S.dayRoutes[key].pins)||[];
+  }
   if(pinsData.length && kakaoMap){
     pinsData.forEach(function(pd,i){
       const pos=new kakao.maps.LatLng(pd.lat,pd.lng);
       const marker=new kakao.maps.Marker({map:kakaoMap,position:pos});
-      const info=new kakao.maps.InfoWindow({content:'<div style="padding:4px 8px;font-size:11px;font-family:sans-serif">'+(i+1)+'. '+pd.name+'</div>'});
+      const fakePlace={place_name:pd.name,road_address_name:pd.addr||'',phone:pd.phone||'',place_url:pd.url||'',category_name:pd.category||'',y:String(pd.lat),x:String(pd.lng)};
+      const infoContent=makePlaceInfoContent(fakePlace,i+1);
+      const info=new kakao.maps.InfoWindow({content:infoContent,removable:true});
       const pin={name:pd.name,lat:pd.lat,lng:pd.lng,marker,infoWindow:info};
       marker.addListener('click',(function(p){return function(){p.infoWindow.open(kakaoMap,p.marker);};})(pin));
       mapPins.push(pin);
     });
     renderMapPins();
-    // 저장된 루트 복원
-    if(S.dayRoutes&&S.dayRoutes[key]&&S.dayRoutes[key].hasRoute){
+    if(key!=='all'&&S.dayRoutes&&S.dayRoutes[key]&&S.dayRoutes[key].hasRoute){
       drawRouteLines();
     }
   } else {
