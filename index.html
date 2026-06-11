@@ -155,6 +155,16 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 .sched-input:focus{border-color:var(--accent)}
 .schedule-content-wrap{display:flex;flex-direction:column;flex:1;min-width:0;gap:2px}
 .schedule-place{font-size:10px;color:var(--accent2);font-weight:500}
+.place-search-wrap{position:relative;flex:2}
+.place-dropdown{position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1.5px solid var(--accent2);border-radius:8px;z-index:50;max-height:180px;overflow-y:auto;box-shadow:var(--shadow);margin-top:2px}
+.place-dropdown-item{padding:9px 12px;font-size:12px;color:var(--text);cursor:pointer;border-bottom:1px solid var(--border);line-height:1.4}
+.place-dropdown-item:last-child{border-bottom:none}
+.place-dropdown-item:hover{background:var(--surface2)}
+.place-dropdown-item .place-name{font-weight:500}
+.place-dropdown-item .place-addr{font-size:10px;color:var(--text3);margin-top:2px}
+.place-dropdown-empty{padding:12px;font-size:12px;color:var(--text3);text-align:center}
+.map-pin-item{cursor:pointer}
+.map-pin-item:hover .map-pin-name{color:var(--accent)}
 .sched-btn{background:var(--accent);color:white;border:none;border-radius:7px;padding:7px 11px;font-size:12px;cursor:pointer;white-space:nowrap}
 .add-day-btn{width:100%;background:var(--surface);border:1.5px dashed var(--border);border-radius:var(--radius);padding:13px;font-size:13px;color:var(--text3);cursor:pointer;font-family:inherit;transition:all .2s}
 .add-day-btn:hover{border-color:var(--accent);color:var(--accent)}
@@ -1264,8 +1274,83 @@ async function addSchedItem(dayIdx){
   await postData({action:'addRow',sheet:'일정',row});
   // 장소 필드가 있을 때만 지도에 자동 추가
   if(place && kakaoMap){
-    autoAddMapPin(place, dayIdx);
+    // 드롭다운에서 선택한 장소면 좌표 바로 사용
+    if(selectedPlaceData[dayIdx] && selectedPlaceData[dayIdx].name === place){
+      addPinForDay(
+        {place_name: selectedPlaceData[dayIdx].name, y: String(selectedPlaceData[dayIdx].lat), x: String(selectedPlaceData[dayIdx].lng)},
+        dayIdx, place
+      );
+      delete selectedPlaceData[dayIdx];
+    } else {
+      // 직접 입력한 경우 검색
+      autoAddMapPin(place, dayIdx);
+    }
   }
+}
+
+// ── 장소 검색 드롭다운 ──
+let placeSearchTimer = {};
+let selectedPlaceData = {}; // dayIdx → {name, lat, lng}
+
+function onPlaceInput(dayIdx, val){
+  clearTimeout(placeSearchTimer[dayIdx]);
+  const dd = document.getElementById('pd-'+dayIdx);
+  if(!val.trim()){ if(dd) dd.style.display='none'; return; }
+  if(!window.kakao||!kakao.maps||!kakao.maps.services){ return; }
+  placeSearchTimer[dayIdx] = setTimeout(function(){
+    const ps = new kakao.maps.services.Places();
+    const tripName = S.settings.tripName||'';
+    const q = tripName ? tripName+' '+val : val;
+    ps.keywordSearch(q, function(data, status){
+      showPlaceDropdown(dayIdx, data, status, val);
+    },{size:5});
+  }, 350);
+}
+
+function showPlaceDropdown(dayIdx, data, status, fallbackVal){
+  const dd = document.getElementById('pd-'+dayIdx);
+  if(!dd) return;
+  if(status !== kakao.maps.services.Status.OK || !data.length){
+    dd.innerHTML = '<div class="place-dropdown-empty">검색 결과가 없어요</div>';
+    dd.style.display='block'; return;
+  }
+  dd.innerHTML = data.map(function(p,i){
+    return '<div class="place-dropdown-item" onmousedown="selectPlace('+dayIdx+','+i+',event)">'
+      + '<div class="place-name">'+p.place_name+'</div>'
+      + '<div class="place-addr">'+(p.road_address_name||p.address_name||'')+'</div>'
+      + '</div>';
+  }).join('');
+  // 데이터 임시 저장
+  dd._searchData = data;
+  dd.style.display='block';
+}
+
+function selectPlace(dayIdx, idx, e){
+  if(e) e.preventDefault();
+  const dd = document.getElementById('pd-'+dayIdx);
+  const inp = document.getElementById('sp-'+dayIdx);
+  if(!dd||!dd._searchData||!inp) return;
+  const place = dd._searchData[idx];
+  inp.value = place.place_name;
+  selectedPlaceData[dayIdx] = {name:place.place_name, lat:parseFloat(place.y), lng:parseFloat(place.x)};
+  dd.style.display='none';
+}
+
+function hidePlaceDropdown(dayIdx){
+  setTimeout(function(){
+    const dd = document.getElementById('pd-'+dayIdx);
+    if(dd) dd.style.display='none';
+  }, 200);
+}
+
+// ── 핀 클릭 → 지도 중심 이동 ──
+function focusPin(idx){
+  if(!kakaoMap||!mapPins[idx]) return;
+  const p = mapPins[idx];
+  const pos = new kakao.maps.LatLng(p.lat, p.lng);
+  kakaoMap.setCenter(pos);
+  kakaoMap.setLevel(4);
+  if(p.infoWindow) p.infoWindow.open(kakaoMap, p.marker);
 }
 
 function autoAddMapPin(query, dayIdx){
@@ -1348,7 +1433,10 @@ function renderSchedule(){
     h+='<input class="sched-input" id="st-'+day.dayIdx+'" placeholder="시간" style="flex:0 0 70px">';
     h+='<input class="sched-input" id="sc-'+day.dayIdx+'" placeholder="일정 내용" onkeydown="if(event.key===\'Enter\')addSchedItem('+day.dayIdx+')">';
     h+='</div><div class="add-sched-row">';
-    h+='<input class="sched-input" id="sp-'+day.dayIdx+'" placeholder="📍 장소 (선택, 지도에 자동 추가)" style="flex:2">';
+    h+='<div class="place-search-wrap" id="pw-'+day.dayIdx+'">';
+    h+='<input class="sched-input" id="sp-'+day.dayIdx+'" placeholder="📍 장소 (선택, 지도에 자동 추가)" style="width:100%" oninput="onPlaceInput('+day.dayIdx+',this.value)" onblur="hidePlaceDropdown('+day.dayIdx+')" autocomplete="off">';
+    h+='<div class="place-dropdown" id="pd-'+day.dayIdx+'" style="display:none"></div>';
+    h+='</div>';
     h+='</div><div class="add-sched-row">';
     h+='<select class="sched-input" id="sk-'+day.dayIdx+'" style="flex:0 0 80px"><option>식사</option><option>이동</option><option>관광</option><option>숙소</option><option>기타</option></select>';
     h+='<button class="sched-btn" onclick="addSchedItem('+day.dayIdx+')">+ 추가</button>';
@@ -1436,14 +1524,14 @@ function renderMapPins(){
   mapPins.forEach(function(p,i){
     const isFirst = i===0;
     const isLast = i===mapPins.length-1;
-    html += '<div class="map-pin-item">'
+    html += '<div class="map-pin-item" onclick="focusPin('+i+')" title="클릭하면 지도에서 위치 확인">'
       + '<div class="map-pin-num">'+(i+1)+'</div>'
-      + '<span style="flex:1;font-size:12px">'+p.name+'</span>'
-      + '<div class="map-pin-btns">'
+      + '<span class="map-pin-name" style="flex:1;font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.name+'</span>'
+      + '<div class="map-pin-btns" onclick="event.stopPropagation()">'
       + '<button class="map-pin-btn" onclick="movePinUp('+i+')" '+(isFirst?'disabled':'')+'>▲</button>'
       + '<button class="map-pin-btn" onclick="movePinDown('+i+')" '+(isLast?'disabled':'')+'>▼</button>'
       + '</div>'
-      + '<span style="font-size:14px;color:var(--text3);cursor:pointer;padding:0 4px;margin-left:2px" onclick="removePin('+i+')">×</span>'
+      + '<span style="font-size:14px;color:var(--text3);cursor:pointer;padding:0 4px;margin-left:2px" onclick="event.stopPropagation();removePin('+i+')">×</span>'
       + '</div>';
   });
   el.innerHTML=html;
