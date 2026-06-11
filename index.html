@@ -592,7 +592,20 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
       <button class="map-search-btn" onclick="searchMap()">검색</button>
     </div>
     <div id="map-container"><div id="map"></div></div>
-    <!-- 검색 결과 목록 — 지도 아래에 표시 -->
+    <!-- 선택된 장소 상세 카드 -->
+    <div id="map-place-card" style="display:none;background:var(--surface);border:1.5px solid var(--accent2);border-radius:12px;padding:14px;margin-bottom:10px">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+        <div style="flex:1;min-width:0">
+          <div id="mpc-name" style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:3px"></div>
+          <div id="mpc-category" style="font-size:11px;color:var(--text3);margin-bottom:5px"></div>
+          <div id="mpc-addr" style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:3px"></div>
+          <div id="mpc-phone" style="font-size:12px;color:var(--text2);margin-bottom:8px"></div>
+          <a id="mpc-link" href="#" target="_blank" style="display:inline-block;background:#FFCD00;color:#333;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:500;text-decoration:none">카카오맵에서 보기 →</a>
+        </div>
+        <button onclick="document.getElementById('map-place-card').style.display='none'" style="background:none;border:none;font-size:18px;color:var(--text3);cursor:pointer;flex-shrink:0;padding:0">×</button>
+      </div>
+    </div>
+    <!-- 검색 결과 목록 -->
     <div id="map-search-results" style="display:none;margin-bottom:10px;border:1.5px solid var(--accent2);border-radius:10px;overflow:hidden;background:var(--surface);max-height:220px;overflow-y:auto"></div>
     <div class="map-pins" id="map-pins"></div>
     <div style="display:flex;gap:8px;margin-top:8px">
@@ -1421,23 +1434,29 @@ function focusPin(idx){
   const pos = new kakao.maps.LatLng(p.lat, p.lng);
   kakaoMap.setCenter(pos);
   kakaoMap.setLevel(4);
-  if(p.infoWindow) p.infoWindow.open(kakaoMap, p.marker);
+  // 상세 카드 표시
+  const fakePlace = {place_name:p.name, category_name:p.category||'', road_address_name:p.addr||'', phone:p.phone||'', place_url:p.url||'', y:String(p.lat), x:String(p.lng)};
+  showPlaceCard(fakePlace, idx+1);
 }
 
-// ── 카카오 장소 상세 정보창 HTML 생성 ──
+// ── 장소 상세 카드 표시 ──
+function showPlaceCard(place, pinNum){
+  const name = place.place_name||place.name||'';
+  const category = place.category_name||place.category||'';
+  const addr = place.road_address_name||place.address_name||place.addr||'';
+  const phone = place.phone||'';
+  const url = place.place_url||place.url||('https://map.kakao.com/link/map/'+encodeURIComponent(name)+','+place.y+','+place.x);
+  document.getElementById('mpc-name').textContent = pinNum+'. '+name;
+  document.getElementById('mpc-category').textContent = category;
+  document.getElementById('mpc-addr').textContent = addr ? '📍 '+addr : '';
+  document.getElementById('mpc-phone').textContent = phone ? '📞 '+phone : '';
+  document.getElementById('mpc-link').href = url;
+  document.getElementById('map-place-card').style.display = 'block';
+}
+// 하위 호환용 (infoWindow content 없이 심플 말풍선)
 function makePlaceInfoContent(place, pinNum){
   const name = place.place_name||place.name||'';
-  const category = place.category_name||'';
-  const addr = place.road_address_name||place.address_name||'';
-  const phone = place.phone||'';
-  const url = place.place_url||('https://map.kakao.com/link/map/'+encodeURIComponent(name)+','+place.y+','+place.x);
-  return '<div class="kakao-info-wrap">'
-    + '<div class="kakao-info-name">'+pinNum+'. '+name+'</div>'
-    + (category?'<div class="kakao-info-category">'+category+'</div>':'')
-    + (addr?'<div class="kakao-info-addr">📍 '+addr+'</div>':'')
-    + (phone?'<div class="kakao-info-phone">📞 '+phone+'</div>':'')
-    + '<a class="kakao-info-link" href="'+url+'" target="_blank">카카오맵에서 보기</a>'
-    + '</div>';
+  return '<div style="padding:5px 10px;font-size:12px;font-family:sans-serif;font-weight:500">'+pinNum+'. '+name+'</div>';
 }
 
 function autoAddMapPin(query, dayIdx){
@@ -1471,7 +1490,7 @@ function addPinForDay(place, dayIdx, label){
   const infoContent = makePlaceInfoContent(place, pinNum);
   const info=new kakao.maps.InfoWindow({content:infoContent,removable:true});
   const pin={name:place.place_name,lat,lng,marker,infoWindow:info,placeData:place};
-  marker.addListener('click',(function(p){return function(){p.infoWindow.open(kakaoMap,p.marker);};})(pin));
+  marker.addListener('click',(function(p,num){return function(){ showPlaceCard(p.placeData||{place_name:p.name,road_address_name:p.addr||'',phone:p.phone||'',place_url:p.url||'',category_name:p.category||'',y:String(p.lat),x:String(p.lng)}, num); };})(pin, pinNum));
   S.dayRoutes[dayKey].pins.push({name:place.place_name,lat,lng,phone:place.phone||'',addr:place.road_address_name||place.address_name||'',url:place.place_url||'',category:place.category_name||''});
   saveLocal();
   // 현재 지도에 해당 Day가 선택돼 있으면 핀 목록 갱신
@@ -1622,7 +1641,8 @@ function addMapPin(place){
   const info=new kakao.maps.InfoWindow({content:infoContent,removable:true});
   info.open(kakaoMap,marker);
   const pin={name:place.place_name,lat,lng,marker,infoWindow:info,placeData:place};
-  marker.addListener('click',(function(p){ return function(){ p.infoWindow.open(kakaoMap,p.marker); }; })(pin));
+  const pinIdx = mapPins.length+1;
+  marker.addListener('click',(function(p,num){ return function(){ showPlaceCard(p.placeData||{place_name:p.name,y:String(p.lat),x:String(p.lng)}, num); }; })(pin, pinIdx));
   mapPins.push(pin);
   const dayKey = currentMapDay==='all' ? 'all' : currentMapDay;
   if(!S.dayRoutes) S.dayRoutes={};
@@ -1752,7 +1772,7 @@ function updatePinMarkers(){
       content: '<div style="padding:4px 8px;font-size:11px;font-family:sans-serif">'+(i+1)+'. '+p.name+'</div>'
     });
     p.infoWindow = info;
-    p.marker.addListener('click', (function(pin){ return function(){ pin.infoWindow.open(kakaoMap, pin.marker); }; })(p));
+    p.marker.addListener('click', (function(pin,num){ return function(){ showPlaceCard({place_name:pin.name,road_address_name:pin.addr||'',phone:pin.phone||'',place_url:pin.url||'',category_name:pin.category||'',y:String(pin.lat),x:String(pin.lng)},num); }; })(p,i+1));
   });
 }
 function restoreMapPins(){
@@ -1809,8 +1829,9 @@ function switchMapDay(dayKey){
       const fakePlace={place_name:pd.name,road_address_name:pd.addr||'',phone:pd.phone||'',place_url:pd.url||'',category_name:pd.category||'',y:String(pd.lat),x:String(pd.lng)};
       const infoContent=makePlaceInfoContent(fakePlace,i+1);
       const info=new kakao.maps.InfoWindow({content:infoContent,removable:true});
-      const pin={name:pd.name,lat:pd.lat,lng:pd.lng,marker,infoWindow:info};
-      marker.addListener('click',(function(p){return function(){p.infoWindow.open(kakaoMap,p.marker);};})(pin));
+      const pin={name:pd.name,lat:pd.lat,lng:pd.lng,marker,infoWindow:info,addr:pd.addr||'',phone:pd.phone||'',url:pd.url||'',category:pd.category||''};
+      const pidx = mapPins.length+1;
+      marker.addListener('click',(function(p,num){return function(){ showPlaceCard({place_name:p.name,road_address_name:p.addr||'',phone:p.phone||'',place_url:p.url||'',category_name:p.category||'',y:String(p.lat),x:String(p.lng)},num); };})(pin,pidx));
       mapPins.push(pin);
     });
     renderMapPins();
