@@ -751,6 +751,7 @@ const STORAGE_KEYS = {
 let CFG = {
   scriptUrl: '',
   kakaoKey: '80997111825554ef64ddb0481b4c0a76',
+  kakaoRestKey: '58c6503f077e54e30aae25de9e76f09f',
   members: ['min','송송이'],
   notionApiKey: '',
   notionPageId: '',
@@ -1296,33 +1297,39 @@ function onPlaceInput(dayIdx, val){
   clearTimeout(placeSearchTimer[dayIdx]);
   const dd = document.getElementById('pd-'+dayIdx);
   if(!val.trim()){ if(dd) dd.style.display='none'; return; }
-  if(!window.kakao||!kakao.maps||!kakao.maps.services){ return; }
   placeSearchTimer[dayIdx] = setTimeout(function(){
-    const ps = new kakao.maps.services.Places();
-    const tripName = S.settings.tripName||'';
-    const q = tripName ? tripName+' '+val : val;
-    ps.keywordSearch(q, function(data, status){
-      showPlaceDropdown(dayIdx, data, status, val);
-    },{size:5});
+    searchPlaceREST(dayIdx, val);
   }, 350);
 }
 
-function showPlaceDropdown(dayIdx, data, status, fallbackVal){
+async function searchPlaceREST(dayIdx, val){
   const dd = document.getElementById('pd-'+dayIdx);
   if(!dd) return;
-  if(status !== kakao.maps.services.Status.OK || !data.length){
-    dd.innerHTML = '<div class="place-dropdown-empty">검색 결과가 없어요</div>';
-    dd.style.display='block'; return;
+  try{
+    const tripName = S.settings.tripName||'';
+    const q = encodeURIComponent(tripName ? tripName+' '+val : val);
+    const res = await fetch(
+      'https://dapi.kakao.com/v2/local/search/keyword.json?query='+q+'&size=5',
+      { headers: { 'Authorization': 'KakaoAK '+CFG.kakaoRestKey } }
+    );
+    const json = await res.json();
+    const data = json.documents||[];
+    if(!data.length){
+      dd.innerHTML='<div class="place-dropdown-empty">검색 결과가 없어요</div>';
+      dd.style.display='block'; return;
+    }
+    dd.innerHTML = data.map(function(p,i){
+      return '<div class="place-dropdown-item" onmousedown="selectPlace('+dayIdx+','+i+',event)">'
+        + '<div class="place-name">'+p.place_name+'</div>'
+        + '<div class="place-addr">'+(p.road_address_name||p.address_name||'')+'</div>'
+        + '</div>';
+    }).join('');
+    dd._searchData = data;
+    dd.style.display='block';
+  } catch(e){
+    dd.innerHTML='<div class="place-dropdown-empty">검색 오류가 났어요</div>';
+    dd.style.display='block';
   }
-  dd.innerHTML = data.map(function(p,i){
-    return '<div class="place-dropdown-item" onmousedown="selectPlace('+dayIdx+','+i+',event)">'
-      + '<div class="place-name">'+p.place_name+'</div>'
-      + '<div class="place-addr">'+(p.road_address_name||p.address_name||'')+'</div>'
-      + '</div>';
-  }).join('');
-  // 데이터 임시 저장
-  dd._searchData = data;
-  dd.style.display='block';
 }
 
 function selectPlace(dayIdx, idx, e){
@@ -1353,24 +1360,30 @@ function focusPin(idx){
   if(p.infoWindow) p.infoWindow.open(kakaoMap, p.marker);
 }
 
-function autoAddMapPin(query, dayIdx){
-  if(!window.kakao||!kakao.maps||!kakao.maps.services) return;
-  const ps = new kakao.maps.services.Places();
-  // 지역 + 키워드로 검색
-  const tripName = S.settings.tripName||'';
-  const searchQuery = tripName ? tripName+' '+query : query;
-  ps.keywordSearch(searchQuery, function(data, status){
-    if(status!==kakao.maps.services.Status.OK||!data.length){
-      // 지역 없이 재검색
-      ps.keywordSearch(query, function(data2, status2){
-        if(status2===kakao.maps.services.Status.OK&&data2.length){
-          addPinForDay(data2[0], dayIdx, query);
-        }
-      });
-      return;
+async function autoAddMapPin(query, dayIdx){
+  try{
+    const tripName = S.settings.tripName||'';
+    const q = encodeURIComponent(tripName ? tripName+' '+query : query);
+    const res = await fetch(
+      'https://dapi.kakao.com/v2/local/search/keyword.json?query='+q+'&size=1',
+      { headers: { 'Authorization': 'KakaoAK '+CFG.kakaoRestKey } }
+    );
+    const json = await res.json();
+    if(json.documents&&json.documents.length){
+      addPinForDay(json.documents[0], dayIdx, query);
+    } else {
+      // 지역명 없이 재검색
+      const q2 = encodeURIComponent(query);
+      const res2 = await fetch(
+        'https://dapi.kakao.com/v2/local/search/keyword.json?query='+q2+'&size=1',
+        { headers: { 'Authorization': 'KakaoAK '+CFG.kakaoRestKey } }
+      );
+      const json2 = await res2.json();
+      if(json2.documents&&json2.documents.length){
+        addPinForDay(json2.documents[0], dayIdx, query);
+      }
     }
-    addPinForDay(data[0], dayIdx, query);
-  });
+  } catch(e){ console.error('place search error:', e); }
 }
 
 function addPinForDay(place, dayIdx, label){
