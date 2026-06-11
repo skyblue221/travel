@@ -356,6 +356,11 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 .notion-page-link{color:var(--accent2);text-decoration:none;font-size:11px}
 .notion-page-link:hover{text-decoration:underline}
 
+/* PIN SCHEDULE */
+.pin-day-btn{width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:11px 14px;font-size:13px;color:var(--text);cursor:pointer;font-family:inherit;text-align:left;transition:all .2s;display:flex;align-items:center;gap:8px}
+.pin-day-btn:hover{background:var(--accent3);border-color:var(--accent)}
+.pin-day-btn .day-badge{background:var(--accent);color:white;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:500;flex-shrink:0}
+
 /* TOAST */
 .save-toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#3a2e28;color:white;border-radius:30px;padding:10px 22px;font-size:12px;z-index:900;transition:transform .3s ease;pointer-events:none;white-space:nowrap}
 .save-toast.show{transform:translateX(-50%) translateY(0)}
@@ -723,6 +728,19 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
     <div class="modal-btns">
       <button class="modal-cancel" onclick="closeMemo()">취소</button>
       <button class="modal-save" onclick="saveMemo()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- PIN TO SCHEDULE MODAL -->
+<div class="modal-backdrop" id="pin-schedule-modal">
+  <div class="modal" style="padding-bottom:28px">
+    <div class="modal-title">📍 일정에도 추가할까요?</div>
+    <div id="pin-schedule-place-name" style="font-size:14px;font-weight:500;color:var(--accent);margin-bottom:14px"></div>
+    <div class="modal-label">어느 날 일정에 추가할까요?</div>
+    <div id="pin-schedule-day-list" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:200px;overflow-y:auto"></div>
+    <div class="modal-btns" style="margin-top:16px">
+      <button class="modal-cancel" onclick="closePinScheduleModal()">괜찮아요</button>
     </div>
   </div>
 </div>
@@ -1546,10 +1564,6 @@ function searchMap(){
       const pin={name:place.place_name,lat,lng,marker,infoWindow:info};
       marker.addListener('click',(function(p){ return function(){ p.infoWindow.open(kakaoMap,p.marker); }; })(pin));
       mapPins.push(pin);
-      // S에도 저장 (좌표+이름만)
-      if(!S.mapPinsData) S.mapPinsData=[];
-  if(!S.dayRoutes) S.dayRoutes={};
-      // 현재 선택된 Day에 저장
       const dayKey = currentMapDay==='all' ? 'all' : currentMapDay;
       if(!S.dayRoutes) S.dayRoutes={};
       if(!S.dayRoutes[dayKey]) S.dayRoutes[dayKey]={pins:[],hasRoute:false};
@@ -1558,8 +1572,59 @@ function searchMap(){
       saveLocal();
       renderMapPins(); document.getElementById('map-search-inp').value='';
       showToast('📍 '+place.place_name+' 추가됨');
+      // 일정 추가 팝업
+      openPinScheduleModal(place.place_name, place.category_name||'');
     } else showToast('장소를 찾을 수 없어요 😢');
   });
+}
+
+// ── 핀 → 일정 추가 팝업 ──
+let pendingPinName = '';
+function openPinScheduleModal(placeName, category){
+  const days = getDayGroups();
+  if(!days.length){ return; } // 일정 없으면 팝업 안 띄움
+  pendingPinName = placeName;
+  document.getElementById('pin-schedule-place-name').textContent = placeName;
+  // 카테고리에서 일정 카테고리 추측
+  let guessedCat = '관광';
+  if(category.includes('음식')||category.includes('식당')||category.includes('카페')) guessedCat='식사';
+  else if(category.includes('숙박')) guessedCat='숙소';
+  const list = document.getElementById('pin-schedule-day-list');
+  list.innerHTML='';
+  days.forEach(function(d){
+    var btn=document.createElement('button');
+    btn.className='pin-day-btn';
+    btn.innerHTML='<span class="day-badge">'+d.dayLabel+'</span><span>'+(d.date||'날짜 미정')+'</span>';
+    btn.onclick=(function(idx,cat){return function(){addPinToSchedule(idx,cat);};})(d.dayIdx,guessedCat);
+    list.appendChild(btn);
+  });
+  document.getElementById('pin-schedule-modal').classList.add('open');
+}
+
+function closePinScheduleModal(){
+  document.getElementById('pin-schedule-modal').classList.remove('open');
+  pendingPinName='';
+}
+
+async function addPinToSchedule(dayIdx, cat){
+  const placeName = pendingPinName; if(!placeName) return;
+  closePinScheduleModal();
+  const days = getDayGroups();
+  const day = days.find(function(d){return d.dayIdx===dayIdx;});
+  const row = {
+    id: genId(),
+    dayIdx: String(dayIdx),
+    dayLabel: day?day.dayLabel:'Day '+(dayIdx+1),
+    date: day?day.date:'',
+    time: '',
+    content: placeName,
+    place: placeName,
+    cat: cat
+  };
+  S.schedule.push(Object.assign({},row,{dayIdx:dayIdx}));
+  renderSchedule();
+  await postData({action:'addRow',sheet:'일정',row});
+  showToast('🗓️ '+day.dayLabel+' 일정에 추가됐어요!');
 }
 function renderMapPins(){
   const el=document.getElementById('map-pins');
