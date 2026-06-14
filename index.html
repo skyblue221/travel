@@ -206,7 +206,9 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 .memo-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:5px}
 .memo-card-title{font-size:13px;font-weight:500}
 .memo-card-date{font-size:10px;color:var(--text3)}
-.memo-card-body{font-size:12px;color:var(--text2);line-height:1.7;white-space:pre-wrap}
+.memo-card-body{font-size:12px;color:var(--text2);line-height:1.7;white-space:pre-wrap;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.memo-card{cursor:pointer;transition:background .15s}
+.memo-card:hover{background:var(--surface2)}
 .memo-empty{padding:36px 20px;text-align:center;color:var(--text3);font-size:13px;line-height:2}
 
 /* ===== DIARY ===== */
@@ -738,7 +740,7 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
   </div>
 </div>
 
-<!-- MEMO MODAL -->
+<!-- MEMO WRITE MODAL -->
 <div class="modal-backdrop" id="memo-modal">
   <div class="modal">
     <div class="modal-title">📝 메모 쓰기</div>
@@ -749,6 +751,37 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
     <div class="modal-btns">
       <button class="modal-cancel" onclick="closeMemo()">취소</button>
       <button class="modal-save" onclick="saveMemo()">저장</button>
+    </div>
+  </div>
+</div>
+
+<!-- MEMO DETAIL MODAL -->
+<div class="modal-backdrop" id="memo-detail-modal">
+  <div class="modal" style="max-height:85vh;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="modal-title" id="memo-detail-title" style="margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+      <button onclick="closeMemoDetail()" style="background:none;border:none;font-size:20px;color:var(--text3);cursor:pointer;flex-shrink:0;padding:0 0 0 8px">×</button>
+    </div>
+    <div id="memo-detail-date" style="font-size:11px;color:var(--text3);margin-bottom:12px"></div>
+    <div id="memo-detail-body" style="font-size:14px;color:var(--text2);line-height:1.8;white-space:pre-wrap;overflow-y:auto;flex:1;padding-right:4px"></div>
+    <div class="modal-btns" style="margin-top:16px;flex-shrink:0">
+      <button class="modal-cancel" onclick="openMemoEdit()">✏️ 수정</button>
+      <button class="modal-save" style="background:#e07070" onclick="deleteMemoFromDetail()">삭제</button>
+    </div>
+  </div>
+</div>
+
+<!-- MEMO EDIT MODAL -->
+<div class="modal-backdrop" id="memo-edit-modal">
+  <div class="modal">
+    <div class="modal-title">✏️ 메모 수정</div>
+    <div class="modal-label">제목</div>
+    <input class="modal-input" id="memo-edit-title" placeholder="제목">
+    <div class="modal-label">내용</div>
+    <textarea class="modal-textarea" id="memo-edit-body" placeholder="내용" style="height:160px"></textarea>
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="closeMemoEdit()">취소</button>
+      <button class="modal-save" onclick="saveMemoEdit()">저장</button>
     </div>
   </div>
 </div>
@@ -2014,6 +2047,70 @@ function clearRoute(){
 // ===================== MEMO =====================
 function openMemoModal(){ document.getElementById('memo-title-inp').value=''; document.getElementById('memo-body-inp').value=''; document.getElementById('memo-modal').classList.add('open'); }
 function closeMemo(){ document.getElementById('memo-modal').classList.remove('open'); }
+// ── 메모 상세 보기 ──
+let viewingMemoId = null;
+
+function openMemoDetail(id){
+  const m = S.memos.find(function(m){ return m.id===id; });
+  if(!m) return;
+  viewingMemoId = id;
+  document.getElementById('memo-detail-title').textContent = '📌 '+m.title;
+  document.getElementById('memo-detail-date').textContent = m.createdAt;
+  document.getElementById('memo-detail-body').textContent = m.body;
+  document.getElementById('memo-detail-modal').classList.add('open');
+}
+
+function closeMemoDetail(){
+  document.getElementById('memo-detail-modal').classList.remove('open');
+  viewingMemoId = null;
+}
+
+function openMemoDetailAndEdit(id){
+  viewingMemoId = id;
+  openMemoEdit();
+}
+
+async function deleteMemoFromDetail(){
+  if(!viewingMemoId) return;
+  const id = viewingMemoId;
+  closeMemoDetail();
+  await deleteMemo(id);
+}
+
+// ── 메모 수정 ──
+function openMemoEdit(){
+  const id = viewingMemoId; if(!id) return;
+  const m = S.memos.find(function(m){ return m.id===id; });
+  if(!m) return;
+  document.getElementById('memo-edit-title').value = m.title;
+  document.getElementById('memo-edit-body').value  = m.body;
+  document.getElementById('memo-detail-modal').classList.remove('open');
+  document.getElementById('memo-edit-modal').classList.add('open');
+}
+
+function closeMemoEdit(){
+  document.getElementById('memo-edit-modal').classList.remove('open');
+}
+
+async function saveMemoEdit(){
+  const id = viewingMemoId; if(!id) return;
+  const m = S.memos.find(function(m){ return m.id===id; });
+  if(!m) return;
+  const newTitle = document.getElementById('memo-edit-title').value.trim()||m.title;
+  const newBody  = document.getElementById('memo-edit-body').value.trim();
+  if(!newBody){ closeMemoEdit(); return; }
+  m.title = newTitle;
+  m.body  = newBody;
+  closeMemoEdit();
+  saveLocal();
+  renderMemos();
+  // Supabase 업데이트
+  if(CFG.supabaseUrl){
+    sbFetch('memos','PATCH',{title:newTitle,body:newBody},'id=eq.'+id).catch(function(e){ console.error(e); });
+  }
+  showToast('메모가 수정됐어요 ✅');
+}
+
 async function saveMemo(){
   const title=document.getElementById('memo-title-inp').value.trim()||'메모', body=document.getElementById('memo-body-inp').value.trim();
   if(!body){ closeMemo(); return; }
@@ -2029,10 +2126,43 @@ async function deleteMemo(id){
   await postData({action:'deleteRow',sheet:'메모',id});
 }
 function renderMemos(){
-  document.getElementById('memo-count').textContent=`메모 ${S.memos.length}개`;
+  document.getElementById('memo-count').textContent='메모 '+S.memos.length+'개';
   const list=document.getElementById('memo-list');
   if(!S.memos.length){ list.innerHTML='<div class="memo-empty">✏️ 기억하고 싶은 순간을 메모해요</div>'; return; }
-  list.innerHTML=S.memos.map(m=>`<div class="memo-card"><div class="memo-card-header"><span class="memo-card-title">📌 ${m.title}</span><span class="memo-card-date">${m.createdAt} <span onclick="deleteMemo('${m.id}')" style="cursor:pointer;margin-left:4px">×</span></span></div><div class="memo-card-body">${m.body}</div></div>`).join('');
+  let html='';
+  list.innerHTML='';
+  S.memos.forEach(function(m){
+    const card = document.createElement('div');
+    card.className = 'memo-card';
+    card.onclick = (function(id){ return function(){ openMemoDetail(id); }; })(m.id);
+    const header = document.createElement('div');
+    header.className = 'memo-card-header';
+    const title = document.createElement('span');
+    title.className = 'memo-card-title';
+    title.textContent = '📌 '+m.title;
+    const dateWrap = document.createElement('span');
+    dateWrap.className = 'memo-card-date';
+    dateWrap.style.cssText = 'display:flex;align-items:center;gap:6px';
+    dateWrap.appendChild(document.createTextNode(m.createdAt));
+    const editBtn = document.createElement('span');
+    editBtn.textContent = '✏️';
+    editBtn.style.cssText = 'cursor:pointer;color:var(--accent2);font-size:12px';
+    editBtn.onclick = (function(id){ return function(e){ e.stopPropagation(); viewingMemoId=id; openMemoEdit(); }; })(m.id);
+    const delBtn = document.createElement('span');
+    delBtn.textContent = '×';
+    delBtn.style.cursor = 'pointer';
+    delBtn.onclick = (function(id){ return function(e){ e.stopPropagation(); deleteMemo(id); }; })(m.id);
+    dateWrap.appendChild(editBtn);
+    dateWrap.appendChild(delBtn);
+    header.appendChild(title);
+    header.appendChild(dateWrap);
+    const body = document.createElement('div');
+    body.className = 'memo-card-body';
+    body.textContent = m.body;
+    card.appendChild(header);
+    card.appendChild(body);
+    list.appendChild(card);
+  });
 }
 
 // ===================== BUDGET =====================
