@@ -766,6 +766,31 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
   </div>
 </div>
 
+<!-- SCHEDULE EDIT MODAL -->
+<div class="modal-backdrop" id="sched-edit-modal">
+  <div class="modal" style="padding-bottom:28px">
+    <div class="modal-title">✏️ 일정 수정</div>
+    <div class="modal-label">시간</div>
+    <input class="modal-input" id="se-time" placeholder="예: 09:00">
+    <div class="modal-label">내용</div>
+    <input class="modal-input" id="se-content" placeholder="일정 내용">
+    <div class="modal-label">장소 (선택)</div>
+    <input class="modal-input" id="se-place" placeholder="장소명">
+    <div class="modal-label">카테고리</div>
+    <select class="modal-input" id="se-cat">
+      <option value="식사">🍽 식사</option>
+      <option value="이동">🚌 이동</option>
+      <option value="관광">🎡 관광</option>
+      <option value="숙소">🏨 숙소</option>
+      <option value="기타">📌 기타</option>
+    </select>
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="closeSchedEdit()">취소</button>
+      <button class="modal-save" onclick="saveSchedEdit()">저장</button>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIRM MODAL -->
 <div class="modal-backdrop" id="confirm-modal">
   <div class="modal" style="padding-bottom:28px">
@@ -1026,12 +1051,23 @@ async function fetchData(){
       sbFetch('expenses',  'GET', null, 'trip_id=eq.'+tripId+'&order=created_at.asc'),
     ]);
     // Supabase 컬럼명 → 앱 필드명 매핑
+    // 지도 핀/루트는 로컬에만 저장 — Supabase 덮어쓰기 방지
+    const savedMapPinsData = S.mapPinsData||[];
+    const savedDayRoutes   = S.dayRoutes||{};
+    const savedDiary       = S.diary||[];
+
     S.wish      = (wish||[]).map(function(r){ return {id:r.id,type:r.type,text:r.text,done:r.done}; });
     S.checklist = (checklist||[]).map(function(r){ return {id:r.id,cat:r.cat,text:r.text,checked:r.checked}; });
     S.schedule  = (schedule||[]).map(function(r){ return {id:r.id,dayIdx:r.day_idx,dayLabel:r.day_label,date:r.date,time:r.time,content:r.content,place:r.place||'',cat:r.cat}; });
     S.memos     = (memos||[]).map(function(r){ return {id:r.id,title:r.title,body:r.body,createdAt:r.created_at}; });
     S.expenses  = (expenses||[]).map(function(r){ return {id:r.id,payer:r.payer,cat:r.cat,desc:r.description,amount:r.amount}; });
-    // trips에 저장된 날짜를 S.settings에 반영 (날짜 초기화 방지)
+
+    // 로컬 전용 데이터 복원
+    S.mapPinsData = savedMapPinsData;
+    S.dayRoutes   = savedDayRoutes;
+    S.diary       = savedDiary;
+
+    // trips에 저장된 날짜를 S.settings에 반영
     const trip = trips.find(function(t){ return t.id===tripId; });
     if(trip){
       if(trip.dateStart && !S.settings.dateStart) S.settings.dateStart = trip.dateStart;
@@ -1500,6 +1536,91 @@ function addPinForDay(place, dayIdx, label){
   }
   showToast('📍 '+place.place_name+' 지도에 추가됐어요!');
 }
+let editingSchedId = null;
+
+function openSchedEdit(id){
+  const item = S.schedule.find(function(s){ return s.id===id; });
+  if(!item) return;
+  editingSchedId = id;
+  document.getElementById('se-time').value = item.time||'';
+  document.getElementById('se-content').value = item.content||'';
+  document.getElementById('se-place').value = item.place||'';
+  document.getElementById('se-cat').value = item.cat||'기타';
+  document.getElementById('sched-edit-modal').classList.add('open');
+}
+
+function closeSchedEdit(){
+  document.getElementById('sched-edit-modal').classList.remove('open');
+  editingSchedId = null;
+}
+
+async function saveSchedEdit(){
+  if(!editingSchedId) return;
+  const item = S.schedule.find(function(s){ return s.id===editingSchedId; });
+  if(!item) return;
+  item.time    = document.getElementById('se-time').value.trim();
+  item.content = document.getElementById('se-content').value.trim();
+  item.place   = document.getElementById('se-place').value.trim();
+  item.cat     = document.getElementById('se-cat').value;
+  closeSchedEdit();
+  saveLocal();
+  renderSchedule();
+  // Supabase 업데이트
+  if(CFG.supabaseUrl && editingSchedId){
+    sbFetch('schedule','PATCH',{
+      time: item.time,
+      content: item.content,
+      place: item.place,
+      cat: item.cat
+    },'id=eq.'+item.id).catch(function(e){ console.error(e); });
+  }
+  showToast('일정이 수정됐어요 ✅');
+}
+
+// 일정 순서 이동 (같은 Day 안에서)
+async function moveSchedItem(id, direction){
+  const item = S.schedule.find(function(s){ return s.id===id; });
+  if(!item) return;
+  const dayIdx = item.dayIdx;
+  // 같은 Day의 아이템들 (content 있는 것만, 현재 정렬 순서 기준)
+  const days = getDayGroups();
+  const day = days.find(function(d){ return d.dayIdx===dayIdx; });
+  if(!day) return;
+  const dayItems = day.items.filter(function(i){ return i.content; });
+  const idx = dayItems.findIndex(function(i){ return i.id===id; });
+  if(idx===-1) return;
+  const swapIdx = direction==='up' ? idx-1 : idx+1;
+  if(swapIdx<0||swapIdx>=dayItems.length) return;
+  // S.schedule에서 두 항목의 실제 인덱스 찾아서 교환
+  const idxA = S.schedule.findIndex(function(s){ return s.id===dayItems[idx].id; });
+  const idxB = S.schedule.findIndex(function(s){ return s.id===dayItems[swapIdx].id; });
+  if(idxA===-1||idxB===-1) return;
+  // created_at 순서가 없으니 임시로 id를 교환 (순서 유지용 order 필드 방식)
+  const tmp = S.schedule[idxA];
+  S.schedule[idxA] = S.schedule[idxB];
+  S.schedule[idxB] = tmp;
+  saveLocal();
+  renderSchedule();
+}
+
+// 일정 📍 탭하면 지도 탭으로 이동 + 해당 위치 포커스
+function goToMapPlace(placeName, schedId){
+  // 지도 탭으로 전환
+  const mapTab = document.querySelector('.tab[onclick*="map"]');
+  if(mapTab) { showTab('map', mapTab); }
+  // 해당 장소 핀 찾아서 포커스
+  setTimeout(function(){
+    const pinIdx = mapPins.findIndex(function(p){ return p.name===placeName; });
+    if(pinIdx !== -1){
+      focusPin(pinIdx);
+    } else {
+      // 핀 없으면 검색창에 장소명 넣고 검색
+      const inp = document.getElementById('map-search-inp');
+      if(inp){ inp.value = placeName; searchMap(); }
+    }
+  }, 300);
+}
+
 async function deleteSchedItem(id){
   const item=S.schedule.find(s=>s.id===id); if(!item) return;
   const ok=await showConfirm('삭제하시겠어요?', '"'+item.content+'"을(를) 삭제해요.');
@@ -1522,15 +1643,23 @@ function renderSchedule(){
     if(hasAnyTime && visItems.length>1){
       h+='<div style="font-size:10px;color:var(--accent2);padding:4px 8px 2px;letter-spacing:.04em">⏱ 시간순 정렬됨</div>';
     }
-    visItems.forEach(function(item){
+    visItems.forEach(function(item, vi){
+      const isFirst = vi===0;
+      const isLast = vi===visItems.length-1;
       h+='<div class="schedule-item">';
       h+='<span class="schedule-time">'+(item.time||'──')+'</span>';
       h+='<div class="schedule-content-wrap">';
       h+='<span class="schedule-content">'+item.content+'</span>';
-      if(item.place){ h+='<span class="schedule-place">📍 '+item.place+'</span>'; }
+      if(item.place){ h+='<span class="schedule-place" style="cursor:pointer" onclick="goToMapPlace(\''+item.place+'\',\''+item.id+'\')" title="지도에서 보기">📍 '+item.place+'</span>'; }
       h+='</div>';
       h+='<span class="schedule-category '+(catMap[item.cat]||'cat-etc')+'">'+item.cat+'</span>';
-      h+='<span style="font-size:12px;color:var(--text3);cursor:pointer;padding:0 4px" onclick="deleteSchedItem(\''+item.id+'\')">×</span>';
+      // 순서 버튼
+      h+='<div style="display:flex;flex-direction:column;gap:1px;flex-shrink:0">';
+      h+='<button style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;width:18px;height:16px;font-size:9px;cursor:pointer;color:var(--text2);line-height:1;padding:0" '+(isFirst?'disabled':'')+' onclick="moveSchedItem(\''+item.id+'\',\'up\')"  >▲</button>';
+      h+='<button style="background:var(--surface2);border:1px solid var(--border);border-radius:3px;width:18px;height:16px;font-size:9px;cursor:pointer;color:var(--text2);line-height:1;padding:0" '+(isLast?'disabled':'')+'  onclick="moveSchedItem(\''+item.id+'\',\'down\')">▼</button>';
+      h+='</div>';
+      h+='<span style="font-size:12px;color:var(--accent2);cursor:pointer;padding:0 2px" onclick="openSchedEdit(\''+item.id+'\')" title="수정">✏️</span>';
+      h+='<span style="font-size:12px;color:var(--text3);cursor:pointer;padding:0 2px" onclick="deleteSchedItem(\''+item.id+'\')" title="삭제">×</span>';
       h+='</div>';
     });
     h+='</div>';
