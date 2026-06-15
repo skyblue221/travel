@@ -364,6 +364,14 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 .notion-page-link{color:var(--accent2);text-decoration:none;font-size:11px}
 .notion-page-link:hover{text-decoration:underline}
 
+/* COMMENTS */
+.comment-item{padding:8px 10px;border-radius:8px;margin-bottom:6px;background:var(--surface2)}
+.comment-author{font-size:11px;font-weight:600;color:var(--accent);margin-bottom:2px}
+.comment-author.me{color:var(--accent2)}
+.comment-body{font-size:13px;color:var(--text2);line-height:1.5}
+.comment-date{font-size:10px;color:var(--text3);margin-top:2px}
+.comment-empty{font-size:12px;color:var(--text3);text-align:center;padding:8px}
+
 /* PIN SCHEDULE */
 .pin-day-btn{width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:11px 14px;font-size:13px;color:var(--text);cursor:pointer;font-family:inherit;text-align:left;transition:all .2s;display:flex;align-items:center;gap:8px}
 .pin-day-btn:hover{background:var(--accent3);border-color:var(--accent)}
@@ -711,6 +719,9 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
   <div class="modal">
     <div class="modal-title">⚙️ 설정</div>
 
+    <div class="modal-section-title">👤 내 이름</div>
+    <div class="modal-label">이 기기에서 댓글 작성 시 표시될 이름</div>
+    <input class="modal-input" id="s-myname" placeholder="예: min">
     <div class="modal-section-title">👥 이 여행 멤버</div>
     <div class="modal-label">멤버 이름 (쉼표로 구분)</div>
     <input class="modal-input" id="s-members" placeholder="min,송송이">
@@ -763,8 +774,16 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
       <button onclick="closeMemoDetail()" style="background:none;border:none;font-size:20px;color:var(--text3);cursor:pointer;flex-shrink:0;padding:0 0 0 8px">×</button>
     </div>
     <div id="memo-detail-date" style="font-size:11px;color:var(--text3);margin-bottom:12px"></div>
-    <div id="memo-detail-body" style="font-size:14px;color:var(--text2);line-height:1.8;white-space:pre-wrap;overflow-y:auto;flex:1;padding-right:4px"></div>
-    <div class="modal-btns" style="margin-top:16px;flex-shrink:0">
+    <div id="memo-detail-body" style="font-size:14px;color:var(--text2);line-height:1.8;white-space:pre-wrap;padding-right:4px;margin-bottom:14px"></div>
+    <!-- 댓글 섹션 -->
+    <div style="border-top:1px solid var(--border);padding-top:12px;flex-shrink:0">
+      <div id="memo-comments-list" style="max-height:140px;overflow-y:auto;margin-bottom:10px"></div>
+      <div style="display:flex;gap:6px">
+        <input class="modal-input" id="memo-comment-inp" placeholder="댓글 남기기..." style="flex:1;padding:8px 12px;font-size:13px" onkeydown="if(event.key==='Enter')addComment('memo')">
+        <button onclick="addComment('memo')" style="background:var(--accent2);color:white;border:none;border-radius:10px;padding:8px 14px;font-size:13px;cursor:pointer;flex-shrink:0">전송</button>
+      </div>
+    </div>
+    <div class="modal-btns" style="margin-top:12px;flex-shrink:0">
       <button class="modal-cancel" onclick="openMemoEdit()">✏️ 수정</button>
       <button class="modal-save" style="background:#e07070" onclick="deleteMemoFromDetail()">삭제</button>
     </div>
@@ -824,6 +843,25 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
   </div>
 </div>
 
+<!-- DIARY COMMENT MODAL -->
+<div class="modal-backdrop" id="diary-comment-modal">
+  <div class="modal" style="max-height:80vh;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div class="modal-title" style="margin:0" id="diary-comment-title">💬 댓글</div>
+      <button onclick="document.getElementById('diary-comment-modal').classList.remove('open')" style="background:none;border:none;font-size:20px;color:var(--text3);cursor:pointer">×</button>
+    </div>
+    <div id="diary-comment-photo" style="margin-bottom:10px"></div>
+    <div id="diary-comment-text" style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:12px;white-space:pre-wrap"></div>
+    <div style="border-top:1px solid var(--border);padding-top:12px;flex:1;display:flex;flex-direction:column;min-height:0">
+      <div id="diary-comments-list" style="flex:1;overflow-y:auto;margin-bottom:10px;min-height:60px"></div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <input class="modal-input" id="diary-comment-inp" placeholder="댓글 남기기..." style="flex:1;padding:8px 12px;font-size:13px" onkeydown="if(event.key==='Enter')addComment('diary')">
+        <button onclick="addComment('diary')" style="background:var(--accent2);color:white;border:none;border-radius:10px;padding:8px 14px;font-size:13px;cursor:pointer;flex-shrink:0">전송</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- CONFIRM MODAL -->
 <div class="modal-backdrop" id="confirm-modal">
   <div class="modal" style="padding-bottom:28px">
@@ -850,6 +888,7 @@ let CFG = {
   kakaoKey: '80997111825554ef64ddb0481b4c0a76',
   kakaoRestKey: '58c6503f077e54e30aae25de9e76f09f',
   members: ['min','송송이'],
+  myName: '',
   notionApiKey: '',
   notionPageId: '',
   supabaseUrl: 'https://zlkknzuzogeikrwzhyvv.supabase.co',
@@ -1184,6 +1223,7 @@ function openSettings(){
   document.getElementById('s-apikey').value=''; // 키는 표시 안 함, 변경할 때만 입력
   document.getElementById('s-apikey').placeholder=CFG.notionApiKey?'저장된 키가 있어요 (변경할 때만 입력)':'ntn_...';
   document.getElementById('s-kakao').value='';
+  document.getElementById('s-myname').value=CFG.myName||'';
   document.getElementById('s-members').value=S.settings.members||'min,송송이';
   // 노션 연결 상태 확인
   if(CFG.notionApiKey){ verifyNotionKey(); }
@@ -1203,6 +1243,8 @@ async function saveSettings(){
     if(oldScript) oldScript.remove();
   } // 키 바뀌면 지도 재초기화
   S.settings.members=document.getElementById('s-members').value.trim();
+  const newMyName=document.getElementById('s-myname').value.trim();
+  if(newMyName){ CFG.myName=newMyName; localStorage.setItem('tp-my-name',newMyName); }
   if(newApiKey){ CFG.notionApiKey=newApiKey; localStorage.setItem(STORAGE_KEYS.notionApiKey, newApiKey); verifyNotionKey(); }
   const trip=trips.find(t=>t.id===currentTripId);
   if(trip){ trip.members=S.settings.members; saveTrips(); }
@@ -2049,8 +2091,9 @@ function openMemoModal(){ document.getElementById('memo-title-inp').value=''; do
 function closeMemo(){ document.getElementById('memo-modal').classList.remove('open'); }
 // ── 메모 상세 보기 ──
 let viewingMemoId = null;
+let viewingDiaryId = null;
 
-function openMemoDetail(id){
+async function openMemoDetail(id){
   const m = S.memos.find(function(m){ return m.id===id; });
   if(!m) return;
   viewingMemoId = id;
@@ -2058,6 +2101,11 @@ function openMemoDetail(id){
   document.getElementById('memo-detail-date').textContent = m.createdAt;
   document.getElementById('memo-detail-body').textContent = m.body;
   document.getElementById('memo-detail-modal').classList.add('open');
+  // 댓글 로드
+  const listEl = document.getElementById('memo-comments-list');
+  if(listEl) listEl.innerHTML='<div class="comment-empty">불러오는 중...</div>';
+  const comments = await loadComments('memo', id);
+  renderComments(comments, listEl);
 }
 
 function closeMemoDetail(){
@@ -2090,6 +2138,71 @@ function openMemoEdit(){
 
 function closeMemoEdit(){
   document.getElementById('memo-edit-modal').classList.remove('open');
+}
+
+// ── 댓글 기능 ──
+let commentsCache = {}; // targetId → comments[]
+
+async function loadComments(targetType, targetId){
+  if(!CFG.supabaseUrl) return [];
+  try{
+    const tripId = currentTripId||'';
+    const data = await sbFetch('comments','GET',null,
+      'trip_id=eq.'+tripId+'&target_type=eq.'+targetType+'&target_id=eq.'+targetId+'&order=created_at.asc'
+    );
+    commentsCache[targetId] = data||[];
+    return data||[];
+  }catch(e){ return []; }
+}
+
+function renderComments(comments, listEl){
+  if(!listEl) return;
+  if(!comments||!comments.length){
+    listEl.innerHTML='<div class="comment-empty">아직 댓글이 없어요</div>';
+    return;
+  }
+  listEl.innerHTML='';
+  comments.forEach(function(c){
+    const isMe = c.author===CFG.myName;
+    const item=document.createElement('div');
+    item.className='comment-item';
+    const dateStr = c.created_at ? new Date(c.created_at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
+    item.innerHTML='<div class="comment-author'+(isMe?' me':'')+'">'+c.author+'</div>'
+      +'<div class="comment-body">'+c.body+'</div>'
+      +'<div class="comment-date">'+dateStr+'</div>';
+    listEl.appendChild(item);
+  });
+  // 최신 댓글로 스크롤
+  listEl.scrollTop = listEl.scrollHeight;
+}
+
+async function addComment(type){
+  const inpId = type==='memo' ? 'memo-comment-inp' : 'diary-comment-inp';
+  const listId = type==='memo' ? 'memo-comments-list' : 'diary-comments-list';
+  const inp = document.getElementById(inpId);
+  const body = inp?inp.value.trim():'';
+  if(!body){ showToast('댓글을 입력해주세요'); return; }
+  const author = CFG.myName || '익명';
+  if(!CFG.myName){ showToast('설정에서 내 이름을 먼저 입력해주세요 ⚙️'); }
+  const targetId = type==='memo' ? viewingMemoId : viewingDiaryId;
+  if(!targetId) return;
+  const comment = {
+    id: genId(),
+    trip_id: currentTripId||'',
+    target_type: type,
+    target_id: targetId,
+    author,
+    body,
+    created_at: new Date().toISOString()
+  };
+  if(!commentsCache[targetId]) commentsCache[targetId]=[];
+  commentsCache[targetId].push(comment);
+  inp.value='';
+  renderComments(commentsCache[targetId], document.getElementById(listId));
+  // Supabase 저장
+  if(CFG.supabaseUrl){
+    sbFetch('comments','POST',comment).catch(function(e){ console.error(e); });
+  }
 }
 
 async function saveMemoEdit(){
@@ -2299,6 +2412,25 @@ async function deleteDiaryEntry(id){
   if(!ok) return;
   S.diary=S.diary.filter(e=>e.id!==id); saveLocal(); renderDiary();
 }
+async function openDiaryComment(entry){
+  viewingDiaryId = entry.id;
+  document.getElementById('diary-comment-title').textContent = '💬 '+(entry.time||entry.dayLabel||'순간');
+  // 사진 표시
+  const photoEl = document.getElementById('diary-comment-photo');
+  if(entry.photoData){
+    photoEl.innerHTML='<img src="'+entry.photoData+'" style="width:100%;border-radius:8px;max-height:180px;object-fit:cover">';
+  } else {
+    photoEl.innerHTML='';
+  }
+  document.getElementById('diary-comment-text').textContent = entry.comment||'';
+  document.getElementById('diary-comment-modal').classList.add('open');
+  // 댓글 로드
+  const listEl = document.getElementById('diary-comments-list');
+  if(listEl) listEl.innerHTML='<div class="comment-empty">불러오는 중...</div>';
+  const comments = await loadComments('diary', entry.id);
+  renderComments(comments, listEl);
+}
+
 function renderDiary(){
   if(!S.diary) S.diary=[];
   populateDiaryDaySelect();
@@ -2338,6 +2470,8 @@ function renderScrapbook(){
     g.items.forEach((e,i)=>{
       const card=document.createElement('div');
       card.className='scrap-card'+(i===0&&g.items.length>2?' wide':'');
+      card.style.cursor='pointer';
+      card.onclick=(function(entry){ return function(){ openDiaryComment(entry); }; })(e);
       const tape=document.createElement('div'); tape.className='scrap-tape';
       const polaroid=document.createElement('div'); polaroid.className='scrap-polaroid';
       if(e.photoData){
@@ -2751,8 +2885,10 @@ async function verifyNotionKey(){
 function init(){
   const savedNotionKey = localStorage.getItem(STORAGE_KEYS.notionApiKey);
   const savedKakaoKey = localStorage.getItem(STORAGE_KEYS.kakaoKey);
+  const savedMyName = localStorage.getItem('tp-my-name');
   if(savedNotionKey) CFG.notionApiKey = savedNotionKey;
   if(savedKakaoKey) CFG.kakaoKey = savedKakaoKey;
+  if(savedMyName) CFG.myName = savedMyName;
   loadTrips(); renderTripList();
   loadTripsFromSupabase();
   // 카카오 SDK 백그라운드 미리 로드 (장소 검색 빠르게)
