@@ -371,6 +371,8 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 .comment-body{font-size:13px;color:var(--text2);line-height:1.5}
 .comment-date{font-size:10px;color:var(--text3);margin-top:2px}
 .comment-empty{font-size:12px;color:var(--text3);text-align:center;padding:8px}
+.comment-item-me{background:rgba(143,181,160,.15);border:1px solid rgba(143,181,160,.3)}
+.comment-badge{display:inline-flex;align-items:center;gap:3px;background:var(--accent2);color:white;border-radius:20px;padding:2px 7px;font-size:10px;font-weight:500;margin-left:6px}
 
 /* PIN SCHEDULE */
 .pin-day-btn{width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:11px 14px;font-size:13px;color:var(--text);cursor:pointer;font-family:inherit;text-align:left;transition:all .2s;display:flex;align-items:center;gap:8px}
@@ -783,9 +785,9 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
         <button onclick="addComment('memo')" style="background:var(--accent2);color:white;border:none;border-radius:10px;padding:8px 14px;font-size:13px;cursor:pointer;flex-shrink:0">전송</button>
       </div>
     </div>
-    <div class="modal-btns" style="margin-top:12px;flex-shrink:0">
-      <button class="modal-cancel" onclick="openMemoEdit()">✏️ 수정</button>
-      <button class="modal-save" style="background:#e07070" onclick="deleteMemoFromDetail()">삭제</button>
+    <div id="memo-detail-btns" class="modal-btns" style="margin-top:12px;flex-shrink:0">
+      <button class="modal-cancel" id="memo-detail-edit-btn" onclick="openMemoEdit()">✏️ 수정</button>
+      <button class="modal-save" id="memo-detail-del-btn" style="background:#e07070" onclick="deleteMemoFromDetail()">삭제</button>
     </div>
   </div>
 </div>
@@ -851,7 +853,10 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
       <button onclick="document.getElementById('diary-comment-modal').classList.remove('open')" style="background:none;border:none;font-size:20px;color:var(--text3);cursor:pointer">×</button>
     </div>
     <div id="diary-comment-photo" style="margin-bottom:10px"></div>
-    <div id="diary-comment-text" style="font-size:13px;color:var(--text2);line-height:1.6;margin-bottom:12px;white-space:pre-wrap"></div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <div id="diary-comment-text" style="font-size:13px;color:var(--text2);line-height:1.6;white-space:pre-wrap;flex:1"></div>
+      <button id="diary-del-btn" onclick="deleteDiaryFromModal()" style="background:none;border:1px solid #e07070;color:#e07070;border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;flex-shrink:0;display:none">삭제</button>
+    </div>
     <div style="border-top:1px solid var(--border);padding-top:12px;flex:1;display:flex;flex-direction:column;min-height:0">
       <div id="diary-comments-list" style="flex:1;overflow-y:auto;margin-bottom:10px;min-height:60px"></div>
       <div style="display:flex;gap:6px;flex-shrink:0">
@@ -1131,7 +1136,7 @@ async function fetchData(){
     S.wish      = (wish||[]).map(function(r){ return {id:r.id,type:r.type,text:r.text,done:r.done}; });
     S.checklist = (checklist||[]).map(function(r){ return {id:r.id,cat:r.cat,text:r.text,checked:r.checked}; });
     S.schedule  = (schedule||[]).map(function(r){ return {id:r.id,dayIdx:r.day_idx,dayLabel:r.day_label,date:r.date,time:r.time,content:r.content,place:r.place||'',cat:r.cat}; });
-    S.memos     = (memos||[]).map(function(r){ return {id:r.id,title:r.title,body:r.body,createdAt:r.created_at}; });
+    S.memos     = (memos||[]).map(function(r){ return {id:r.id,title:r.title,body:r.body,createdAt:r.created_at,author:r.author||''}; });
     S.expenses  = (expenses||[]).map(function(r){ return {id:r.id,payer:r.payer,cat:r.cat,desc:r.description,amount:r.amount}; });
 
     // 로컬 전용 데이터 복원
@@ -1181,7 +1186,7 @@ async function postData(payload){
       if(table==='wish')      { row.type=r.type; row.text=r.text; row.done=r.done==='true'||r.done===true; }
       if(table==='checklist') { row.cat=r.cat; row.text=r.text; row.checked=r.checked==='true'||r.checked===true; }
       if(table==='schedule')  { row.day_idx=Number(r.dayIdx); row.day_label=r.dayLabel; row.date=r.date; row.time=r.time; row.content=r.content; row.place=r.place||''; row.cat=r.cat; }
-      if(table==='memos')     { row.title=r.title; row.body=r.body; }
+      if(table==='memos')     { row.title=r.title; row.body=r.body; row.author=r.author||''; }
       if(table==='expenses')  { row.payer=r.payer; row.cat=r.cat; row.description=r.desc; row.amount=Number(r.amount); }
       await sbFetch(table, 'POST', row);
     }
@@ -1312,7 +1317,11 @@ function showTab(name,el){
       },100);
     }
   }
-  if(name==='diary') populateDiaryDaySelect();
+  if(name==='diary'){
+    populateDiaryDaySelect();
+    if(S.diary&&S.diary.length) preloadCommentCounts('diary',S.diary.map(function(e){return e.id;}));
+  }
+  if(name==='memo'&&S.memos&&S.memos.length) preloadCommentCounts('memo',S.memos.map(function(m){return m.id;})).then(function(){ renderMemos(); });
   if(name==='budget'){ populatePayerSelect(); renderBudget(); }
 }
 
@@ -2098,8 +2107,14 @@ async function openMemoDetail(id){
   if(!m) return;
   viewingMemoId = id;
   document.getElementById('memo-detail-title').textContent = '📌 '+m.title;
-  document.getElementById('memo-detail-date').textContent = m.createdAt;
+  document.getElementById('memo-detail-date').textContent = m.createdAt+(m.author?' · '+m.author:'');
   document.getElementById('memo-detail-body').textContent = m.body;
+  // 내 글만 수정/삭제 버튼 표시
+  const isMyMemo2 = !m.author || (CFG.myName && m.author===CFG.myName);
+  const editBtn2=document.getElementById('memo-detail-edit-btn');
+  const delBtn2=document.getElementById('memo-detail-del-btn');
+  if(editBtn2) editBtn2.style.display=isMyMemo2?'':'none';
+  if(delBtn2)  delBtn2.style.display=isMyMemo2?'':'none';
   document.getElementById('memo-detail-modal').classList.add('open');
   // 댓글 로드
   const listEl = document.getElementById('memo-comments-list');
@@ -2158,22 +2173,109 @@ async function loadComments(targetType, targetId){
 function renderComments(comments, listEl){
   if(!listEl) return;
   if(!comments||!comments.length){
-    listEl.innerHTML='<div class="comment-empty">아직 댓글이 없어요</div>';
+    listEl.innerHTML='<div class="comment-empty">아직 댓글이 없어요 💬</div>';
     return;
   }
   listEl.innerHTML='';
   comments.forEach(function(c){
-    const isMe = c.author===CFG.myName;
+    const isMe = CFG.myName && c.author===CFG.myName;
     const item=document.createElement('div');
-    item.className='comment-item';
+    item.className='comment-item'+(isMe?' comment-item-me':'');
     const dateStr = c.created_at ? new Date(c.created_at).toLocaleString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '';
-    item.innerHTML='<div class="comment-author'+(isMe?' me':'')+'">'+c.author+'</div>'
-      +'<div class="comment-body">'+c.body+'</div>'
-      +'<div class="comment-date">'+dateStr+'</div>';
+    const headerEl = document.createElement('div');
+    headerEl.style.cssText='display:flex;align-items:center;justify-content:space-between;margin-bottom:3px';
+    const authorEl = document.createElement('div');
+    authorEl.className='comment-author'+(isMe?' me':'');
+    authorEl.textContent = c.author;
+    headerEl.appendChild(authorEl);
+    if(isMe){
+      const btnWrap = document.createElement('div');
+      btnWrap.style.cssText='display:flex;gap:6px';
+      const editBtn = document.createElement('button');
+      editBtn.textContent='수정';
+      editBtn.style.cssText='background:none;border:none;font-size:10px;color:var(--accent2);cursor:pointer;padding:0';
+      editBtn.onclick=(function(comment){ return function(){ openCommentEdit(comment); }; })(c);
+      const delBtn = document.createElement('button');
+      delBtn.textContent='삭제';
+      delBtn.style.cssText='background:none;border:none;font-size:10px;color:#e07070;cursor:pointer;padding:0';
+      delBtn.onclick=(function(comment, el){ return function(){ deleteComment(comment, el); }; })(c, item);
+      btnWrap.appendChild(editBtn);
+      btnWrap.appendChild(delBtn);
+      headerEl.appendChild(btnWrap);
+    }
+    item.appendChild(headerEl);
+    const bodyEl = document.createElement('div');
+    bodyEl.className='comment-body';
+    bodyEl.id='comment-body-'+c.id;
+    bodyEl.textContent=c.body;
+    item.appendChild(bodyEl);
+    const dateEl = document.createElement('div');
+    dateEl.className='comment-date';
+    dateEl.textContent=dateStr;
+    item.appendChild(dateEl);
     listEl.appendChild(item);
   });
-  // 최신 댓글로 스크롤
   listEl.scrollTop = listEl.scrollHeight;
+}
+
+// 댓글 수정
+let editingCommentId = null;
+let editingCommentType = null;
+
+function openCommentEdit(comment){
+  editingCommentId = comment.id;
+  editingCommentType = comment.target_type;
+  // 인라인 수정 — body를 input으로 교체
+  const bodyEl = document.getElementById('comment-body-'+comment.id);
+  if(!bodyEl) return;
+  const inp = document.createElement('input');
+  inp.value = comment.body;
+  inp.style.cssText='width:100%;border:1.5px solid var(--accent2);border-radius:6px;padding:5px 8px;font-size:13px;font-family:inherit;outline:none;margin:2px 0';
+  inp.onkeydown = function(e){
+    if(e.key==='Enter') saveCommentEdit(comment, inp.value.trim());
+    if(e.key==='Escape'){ bodyEl.textContent=comment.body; inp.remove(); }
+  };
+  bodyEl.textContent='';
+  bodyEl.appendChild(inp);
+  inp.focus();
+  // 저장 버튼
+  const saveBtn=document.createElement('button');
+  saveBtn.textContent='저장';
+  saveBtn.style.cssText='background:var(--accent2);color:white;border:none;border-radius:6px;padding:3px 10px;font-size:11px;cursor:pointer;margin-top:3px';
+  saveBtn.onclick=function(){ saveCommentEdit(comment, inp.value.trim()); };
+  bodyEl.appendChild(document.createElement('br'));
+  bodyEl.appendChild(saveBtn);
+}
+
+async function saveCommentEdit(comment, newBody){
+  if(!newBody) return;
+  comment.body = newBody;
+  const bodyEl = document.getElementById('comment-body-'+comment.id);
+  if(bodyEl){ bodyEl.textContent=newBody; }
+  // commentsCache 업데이트
+  Object.keys(commentsCache).forEach(function(key){
+    commentsCache[key].forEach(function(c){ if(c.id===comment.id) c.body=newBody; });
+  });
+  // Supabase 업데이트
+  if(CFG.supabaseUrl){
+    sbFetch('comments','PATCH',{body:newBody},'id=eq.'+comment.id).catch(function(e){ console.error(e); });
+  }
+  showToast('댓글이 수정됐어요 ✅');
+}
+
+async function deleteComment(comment, itemEl){
+  const ok = await showConfirm('댓글을 삭제할까요?', '"'+comment.body.slice(0,20)+'"');
+  if(!ok) return;
+  if(itemEl) itemEl.remove();
+  // cache에서 제거
+  Object.keys(commentsCache).forEach(function(key){
+    commentsCache[key] = commentsCache[key].filter(function(c){ return c.id!==comment.id; });
+  });
+  // 뱃지 업데이트
+  updateCommentBadge(comment.target_type, comment.target_id);
+  if(CFG.supabaseUrl){
+    sbFetch('comments','DELETE',null,'id=eq.'+comment.id).catch(function(e){ console.error(e); });
+  }
 }
 
 async function addComment(type){
@@ -2199,7 +2301,7 @@ async function addComment(type){
   commentsCache[targetId].push(comment);
   inp.value='';
   renderComments(commentsCache[targetId], document.getElementById(listId));
-  // Supabase 저장
+  updateCommentBadge(type, targetId);
   if(CFG.supabaseUrl){
     sbFetch('comments','POST',comment).catch(function(e){ console.error(e); });
   }
@@ -2228,7 +2330,8 @@ async function saveMemo(){
   const title=document.getElementById('memo-title-inp').value.trim()||'메모', body=document.getElementById('memo-body-inp').value.trim();
   if(!body){ closeMemo(); return; }
   const now=new Date().toLocaleDateString('ko-KR',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
-  const row={id:genId(),title,body,createdAt:now}; S.memos.unshift(row); closeMemo(); renderMemos();
+  const author=CFG.myName||'';
+  const row={id:genId(),title,body,createdAt:now,author}; S.memos.unshift(row); closeMemo(); renderMemos();
   await postData({action:'addRow',sheet:'메모',row});
 }
 async function deleteMemo(id){
@@ -2257,23 +2360,50 @@ function renderMemos(){
     dateWrap.className = 'memo-card-date';
     dateWrap.style.cssText = 'display:flex;align-items:center;gap:6px';
     dateWrap.appendChild(document.createTextNode(m.createdAt));
-    const editBtn = document.createElement('span');
-    editBtn.textContent = '✏️';
-    editBtn.style.cssText = 'cursor:pointer;color:var(--accent2);font-size:12px';
-    editBtn.onclick = (function(id){ return function(e){ e.stopPropagation(); viewingMemoId=id; openMemoEdit(); }; })(m.id);
-    const delBtn = document.createElement('span');
-    delBtn.textContent = '×';
-    delBtn.style.cursor = 'pointer';
-    delBtn.onclick = (function(id){ return function(e){ e.stopPropagation(); deleteMemo(id); }; })(m.id);
-    dateWrap.appendChild(editBtn);
-    dateWrap.appendChild(delBtn);
+    // 작성자 표시
+    if(m.author){
+      const authorBadge=document.createElement('span');
+      authorBadge.textContent=m.author;
+      authorBadge.style.cssText='font-size:10px;color:var(--text3);background:var(--surface2);border-radius:10px;padding:1px 7px';
+      dateWrap.appendChild(authorBadge);
+    }
+    // 내가 쓴 글만 수정/삭제 버튼 표시
+    const isMyMemo = !m.author || (CFG.myName && m.author===CFG.myName);
+    if(isMyMemo){
+      const editBtn = document.createElement('span');
+      editBtn.textContent = '✏️';
+      editBtn.style.cssText = 'cursor:pointer;color:var(--accent2);font-size:12px';
+      editBtn.onclick = (function(id){ return function(e){ e.stopPropagation(); viewingMemoId=id; openMemoEdit(); }; })(m.id);
+      const delBtn = document.createElement('span');
+      delBtn.textContent = '×';
+      delBtn.style.cursor = 'pointer';
+      delBtn.onclick = (function(id){ return function(e){ e.stopPropagation(); deleteMemo(id); }; })(m.id);
+      dateWrap.appendChild(editBtn);
+      dateWrap.appendChild(delBtn);
+    }
     header.appendChild(title);
     header.appendChild(dateWrap);
     const body = document.createElement('div');
     body.className = 'memo-card-body';
     body.textContent = m.body;
-    card.appendChild(header);
-    card.appendChild(body);
+    // 댓글 뱃지
+    const cnt = commentsCache[m.id]?commentsCache[m.id].length:0;
+    if(cnt>0){
+      const badge=document.createElement('span');
+      badge.className='comment-badge';
+      badge.textContent='💬 '+cnt;
+      body.appendChild(document.createTextNode(' '));
+      // 카드 하단에 뱃지
+      const badgeWrap=document.createElement('div');
+      badgeWrap.style.marginTop='6px';
+      badgeWrap.appendChild(badge);
+      card.appendChild(header);
+      card.appendChild(body);
+      card.appendChild(badgeWrap);
+    } else {
+      card.appendChild(header);
+      card.appendChild(body);
+    }
     list.appendChild(card);
   });
 }
@@ -2392,7 +2522,7 @@ function addDiaryEntry(){
   if(!comment&&!pendingPhotoData){ showToast('사진이나 글을 추가해주세요'); return; }
   const dayIdx=daySelVal==='-1'?-1:Number(daySelVal);
   const days=getDayGroups(), day=days.find(d=>d.dayIdx===dayIdx);
-  S.diary.unshift({id:genId(),dayIdx,dayLabel:day?.dayLabel||'기타',date:day?.date||'',time,comment,photoData:pendingPhotoData||null});
+  S.diary.unshift({id:genId(),dayIdx,dayLabel:day?day.dayLabel:'기타',date:day?day.date:'',time,comment,photoData:pendingPhotoData||null,author:CFG.myName||''});
   saveLocal();
   // 입력 초기화
   document.getElementById('diary-comment-inp').value='';
@@ -2412,9 +2542,57 @@ async function deleteDiaryEntry(id){
   if(!ok) return;
   S.diary=S.diary.filter(e=>e.id!==id); saveLocal(); renderDiary();
 }
+// 댓글 뱃지 업데이트
+function updateCommentBadge(type, targetId){
+  const count = commentsCache[targetId]?commentsCache[targetId].length:0;
+  if(type==='memo'){
+    // 메모 카드에서 해당 id 찾아서 뱃지 업데이트
+    renderMemos();
+  } else if(type==='diary'){
+    renderDiary();
+  }
+}
+
+// 댓글 수 프리로드 (메모/일기 열 때)
+async function preloadCommentCounts(type, ids){
+  if(!CFG.supabaseUrl||!ids.length) return;
+  try{
+    const tripId=currentTripId||'';
+    const data=await sbFetch('comments','GET',null,
+      'trip_id=eq.'+tripId+'&target_type=eq.'+type+'&select=id,target_id'
+    );
+    if(!data) return;
+    // 초기화
+    ids.forEach(function(id){ if(!commentsCache[id]) commentsCache[id]=[]; });
+    // target_id별로 id만 임시 저장 (카운트용)
+    data.forEach(function(c){
+      if(!commentsCache[c.target_id]) commentsCache[c.target_id]=[];
+      // 중복 방지
+      if(!commentsCache[c.target_id].find(function(x){return x.id===c.id;})){
+        commentsCache[c.target_id].push(c);
+      }
+    });
+  }catch(e){}
+}
+
+async function deleteDiaryFromModal(){
+  if(!viewingDiaryId) return;
+  const entry=S.diary.find(function(e){return e.id===viewingDiaryId;});
+  if(!entry) return;
+  const ok=await showConfirm('삭제하시겠어요?','이 순간 기록을 삭제해요.');
+  if(!ok) return;
+  document.getElementById('diary-comment-modal').classList.remove('open');
+  await deleteDiaryEntry(viewingDiaryId);
+  viewingDiaryId=null;
+}
+
 async function openDiaryComment(entry){
   viewingDiaryId = entry.id;
-  document.getElementById('diary-comment-title').textContent = '💬 '+(entry.time||entry.dayLabel||'순간');
+  document.getElementById('diary-comment-title').textContent = '💬 '+(entry.time||entry.dayLabel||'순간')+(entry.author?' · '+entry.author:'');
+  // 삭제 버튼 — 내 글만
+  const isMyDiary2 = !entry.author || (CFG.myName && entry.author===CFG.myName);
+  const diaryDelBtn=document.getElementById('diary-del-btn');
+  if(diaryDelBtn) diaryDelBtn.style.display=isMyDiary2?'inline-block':'none';
   // 사진 표시
   const photoEl = document.getElementById('diary-comment-photo');
   if(entry.photoData){
