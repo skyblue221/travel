@@ -722,8 +722,9 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
     <div class="modal-title">⚙️ 설정</div>
 
     <div class="modal-section-title">👤 내 이름</div>
-    <div class="modal-label">이 기기에서 댓글 작성 시 표시될 이름</div>
+    <div class="modal-label">이 기기에서 댓글/메모 작성 시 표시될 이름</div>
     <input class="modal-input" id="s-myname" placeholder="예: min">
+    <div id="s-myname-status" style="font-size:11px;color:var(--accent2);margin-top:4px"></div>
     <div class="modal-section-title">👥 이 여행 멤버</div>
     <div class="modal-label">멤버 이름 (쉼표로 구분)</div>
     <input class="modal-input" id="s-members" placeholder="min,송송이">
@@ -1220,6 +1221,9 @@ function applySettings(){
   document.getElementById('date-end').value=S.settings.dateEnd||'';
   CFG.members=(S.settings.members||'min,송송이').split(',').map(m=>m.trim()).filter(Boolean);
   renderMembers(); updateDday(); populatePayerSelect(); populateDiaryDaySelect();
+  // 헤더 서브텍스트에 내 이름 표시
+  const subEl=document.getElementById('header-sub');
+  if(subEl) subEl.textContent=CFG.myName?'👤 '+CFG.myName+' · 둘이 함께 만드는 여행 기록':'둘이 함께 만드는 여행 기록';
 }
 function renderMembers(){
   document.getElementById('member-chips').innerHTML=CFG.members.map(m=>`<div class="member-chip">👤 ${m}</div>`).join('');
@@ -1229,6 +1233,8 @@ function openSettings(){
   document.getElementById('s-apikey').placeholder=CFG.notionApiKey?'저장된 키가 있어요 (변경할 때만 입력)':'ntn_...';
   document.getElementById('s-kakao').value='';
   document.getElementById('s-myname').value=CFG.myName||'';
+  const nameStatus=document.getElementById('s-myname-status');
+  if(nameStatus) nameStatus.textContent=CFG.myName?'현재: '+CFG.myName:'아직 이름이 없어요';
   document.getElementById('s-members').value=S.settings.members||'min,송송이';
   // 노션 연결 상태 확인
   if(CFG.notionApiKey){ verifyNotionKey(); }
@@ -1237,26 +1243,32 @@ function openSettings(){
 }
 function closeSettings(){ document.getElementById('settings-modal').classList.remove('open'); }
 async function saveSettings(){
-  const newApiKey=document.getElementById('s-apikey').value.trim();
-  const newKakaoKey=document.getElementById('s-kakao').value.trim();
-  CFG.scriptUrl=document.getElementById('s-url').value.trim();
-  if(newKakaoKey&&newKakaoKey!==CFG.kakaoKey){
-    CFG.kakaoKey=newKakaoKey;
-    localStorage.setItem(STORAGE_KEYS.kakaoKey, newKakaoKey);
-    kakaoMap=null;
-    const oldScript=document.getElementById('kakao-script');
-    if(oldScript) oldScript.remove();
-  } // 키 바뀌면 지도 재초기화
-  S.settings.members=document.getElementById('s-members').value.trim();
-  const newMyName=document.getElementById('s-myname').value.trim();
-  if(newMyName){ CFG.myName=newMyName; localStorage.setItem('tp-my-name',newMyName); }
-  if(newApiKey){ CFG.notionApiKey=newApiKey; localStorage.setItem(STORAGE_KEYS.notionApiKey, newApiKey); verifyNotionKey(); }
-  const trip=trips.find(t=>t.id===currentTripId);
-  if(trip){ trip.members=S.settings.members; saveTrips(); }
-  applySettings(); closeSettings();
-  if(CFG.kakaoKey&&!kakaoMap) loadKakaoMap();
-  await postData({action:'saveSettings',settings:{'멤버':S.settings.members}});
-  showToast('설정 저장됐어요 ✅');
+  try{
+    const newApiKey=document.getElementById('s-apikey').value.trim();
+    const newKakaoKey=document.getElementById('s-kakao').value.trim();
+    // 내 이름 — 비어있으면 초기화, 있으면 저장
+    const newMyName=document.getElementById('s-myname').value.trim();
+    CFG.myName=newMyName;
+    localStorage.setItem('tp-my-name',newMyName);
+    if(newKakaoKey&&newKakaoKey!==CFG.kakaoKey){
+      CFG.kakaoKey=newKakaoKey;
+      localStorage.setItem(STORAGE_KEYS.kakaoKey, newKakaoKey);
+      kakaoMap=null;
+      const oldScript=document.getElementById('kakao-script');
+      if(oldScript) oldScript.remove();
+    }
+    S.settings.members=document.getElementById('s-members').value.trim();
+    if(newApiKey){ CFG.notionApiKey=newApiKey; localStorage.setItem(STORAGE_KEYS.notionApiKey, newApiKey); verifyNotionKey(); }
+    const trip=trips.find(function(t){return t.id===currentTripId;});
+    if(trip){ trip.members=S.settings.members; saveTrips(); }
+    applySettings(); closeSettings();
+    if(CFG.kakaoKey&&!kakaoMap) loadKakaoMap();
+    await postData({action:'saveSettings',settings:{'멤버':S.settings.members}});
+    showToast('설정 저장됐어요 ✅'+(CFG.myName?' ('+CFG.myName+'으로 저장됨)':''));
+  }catch(e){
+    console.error('saveSettings error:',e);
+    showToast('저장 중 오류: '+e.message);
+  }
 }
 
 // ===================== DATE =====================
