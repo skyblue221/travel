@@ -526,8 +526,7 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 <div class="tabs">
   <div class="tab active" onclick="showTab('wish',this)">🌟 위시</div>
   <div class="tab" onclick="showTab('checklist',this)">✅ 체크</div>
-  <div class="tab" onclick="showTab('schedule',this)">🗓️ 일정</div>
-  <div class="tab" onclick="showTab('map',this)">🗺️ 지도</div>
+  <div class="tab" onclick="showTab('schedule',this)">🗓️ 일정·지도</div>
   <div class="tab" onclick="showTab('memo',this)">📝 메모</div>
   <div class="tab" onclick="showTab('budget',this)">💰 예산</div>
   <div class="tab" onclick="showTab('diary',this)">📸 일기</div>
@@ -587,24 +586,16 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 
 <!-- SCHEDULE -->
 <div class="section" id="sec-schedule">
-  <div class="section-title">🗓️ 날짜별 일정</div>
-  <div id="schedule-container"></div>
-  <button class="add-day-btn" onclick="addDay()">+ 날짜 추가</button>
-</div>
-
-<!-- MAP -->
-<div class="section" id="sec-map">
-  <div class="section-title">🗺️ 지도</div>
-  <!-- Day 선택 탭 (지도 유무와 관계없이 항상 표시) -->
+  <!-- Day 탭 (일정+지도 공용) -->
   <div class="map-day-tabs" id="map-day-tabs"></div>
+
+  <!-- 지도 영역 (고정 높이) -->
   <div id="map-ui">
-    <!-- 검색 -->
     <div class="map-search-row">
       <input class="map-search-input" id="map-search-inp" placeholder="장소 검색 (예: 경복궁, 성수동 카페)" onkeydown="if(event.key==='Enter')searchMap()">
       <button class="map-search-btn" onclick="searchMap()">검색</button>
     </div>
     <div id="map-container"><div id="map"></div></div>
-    <!-- 선택된 장소 상세 카드 -->
     <div id="map-place-card" style="display:none;background:var(--surface);border:1.5px solid var(--accent2);border-radius:12px;padding:14px;margin-bottom:10px">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
         <div style="flex:1;min-width:0">
@@ -617,17 +608,21 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
         <button onclick="document.getElementById('map-place-card').style.display='none'" style="background:none;border:none;font-size:18px;color:var(--text3);cursor:pointer;flex-shrink:0;padding:0">×</button>
       </div>
     </div>
-    <!-- 검색 결과 목록 -->
     <div id="map-search-results" style="display:none;margin-bottom:10px;border:1.5px solid var(--accent2);border-radius:10px;overflow:hidden;background:var(--surface);max-height:220px;overflow-y:auto"></div>
     <div class="map-pins" id="map-pins"></div>
-    <div style="display:flex;gap:8px;margin-top:8px">
+    <div style="display:flex;gap:8px;margin-top:8px;margin-bottom:14px">
       <button class="map-route-btn" style="flex:3;white-space:nowrap" onclick="drawRoute()">🛣️ 루트 그리기</button>
       <button class="map-route-btn" style="flex:1;white-space:nowrap" onclick="clearRoute()">🗑️ 루트 지우기</button>
     </div>
   </div>
-  <div class="map-no-key hidden" id="map-no-key" style="display:none">
+  <div class="map-no-key hidden" id="map-no-key" style="display:none;margin-bottom:14px">
     🗺️ 지도를 사용하려면<br>설정에서 카카오맵 API 키를 입력해주세요<br><br><small>설정 ⚙️ → 카카오맵 API 키</small>
   </div>
+
+  <!-- 일정 영역 -->
+  <div class="section-title" style="margin-top:4px">🗓️ 일정</div>
+  <div id="schedule-container"></div>
+  <button class="add-day-btn" onclick="addDay()">+ 날짜 추가</button>
 </div>
 
 <!-- MEMO -->
@@ -1334,8 +1329,8 @@ function showTab(name,el){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.getElementById('sec-'+name).classList.add('active');
   el.classList.add('active');
-  if(name==='map'){
-    // Day 탭은 카카오맵 여부와 관계없이 항상 렌더링
+  if(name==='schedule'){
+    // Day 탭은 카카오맵 여부와 관계없이 항상 렌더링 (일정+지도 공용)
     renderMapDayTabs();
     if(!CFG.kakaoKey){
       document.getElementById('map-ui').style.display='none';
@@ -1450,6 +1445,7 @@ async function addDay(){
   let date=''; if(S.settings.dateStart){ const d=new Date(S.settings.dateStart); d.setDate(d.getDate()+dayIdx); date=d.toLocaleDateString('ko-KR',{month:'long',day:'numeric',weekday:'short'}); }
   const row={id:genId(),dayIdx:String(dayIdx),dayLabel:`Day ${dayIdx+1}`,date,time:'',content:'',cat:'기타'};
   S.schedule.push({...row,dayIdx}); renderSchedule(); renderDiary();
+  renderMapDayTabs(); // 새 Day 탭도 지도쪽에 즉시 반영
   await postData({action:'addRow',sheet:'일정',row});
 }
 async function addSchedItem(dayIdx){
@@ -1749,25 +1745,22 @@ async function moveSchedItem(id, direction){
 
 // 일정 📍 탭하면 지도 탭으로 이동 + 해당 위치 포커스
 function goToMapPlace(placeName, schedId){
-  // 일정 항목의 dayIdx를 찾아서 그 Day로 전환
+  // 같은 화면(일정+지도 통합)이므로 탭 전환 없이 해당 Day로 전환 + 핀 포커스
   const item = S.schedule.find(function(s){ return s.id===schedId; });
   const targetDay = item ? String(item.dayIdx) : 'all';
-  const mapTab = document.querySelector('.tab[onclick*="map"]');
-  if(mapTab) { showTab('map', mapTab); }
+  if(currentMapDay!==targetDay){ switchMapDay(targetDay); }
+  // 지도 영역으로 스크롤
+  const mapContainer = document.getElementById('map-container');
+  if(mapContainer) mapContainer.scrollIntoView({behavior:'smooth',block:'center'});
   setTimeout(function(){
-    if(currentMapDay!==targetDay && allPinsCache && Object.keys(allPinsCache).length){
-      switchMapDay(targetDay);
+    const pinIdx = mapPins.findIndex(function(p){ return p.name===placeName; });
+    if(pinIdx !== -1){
+      focusPin(pinIdx);
+    } else {
+      const inp = document.getElementById('map-search-inp');
+      if(inp){ inp.value = placeName; searchMap(); }
     }
-    setTimeout(function(){
-      const pinIdx = mapPins.findIndex(function(p){ return p.name===placeName; });
-      if(pinIdx !== -1){
-        focusPin(pinIdx);
-      } else {
-        const inp = document.getElementById('map-search-inp');
-        if(inp){ inp.value = placeName; searchMap(); }
-      }
-    }, 150);
-  }, 300);
+  }, 200);
 }
 
 async function deleteSchedItem(id){
@@ -1779,8 +1772,12 @@ async function deleteSchedItem(id){
 }
 const catMap={'식사':'cat-meal','이동':'cat-move','관광':'cat-see','숙소':'cat-stay','기타':'cat-etc'};
 function renderSchedule(){
-  const container=document.getElementById('schedule-container'), days=getDayGroups();
-  if(!days.length){ container.innerHTML='<div style="padding:28px;text-align:center;color:var(--text3);font-size:13px;line-height:2">+ 날짜 추가를 눌러<br>일정을 만들어요 🗓️</div>'; return; }
+  const container=document.getElementById('schedule-container'), allDays=getDayGroups();
+  if(!allDays.length){ container.innerHTML='<div style="padding:28px;text-align:center;color:var(--text3);font-size:13px;line-height:2">+ 날짜 추가를 눌러<br>일정을 만들어요 🗓️</div>'; return; }
+  // 현재 지도에서 선택된 Day와 동기화 — '전체'면 모든 Day, 아니면 해당 Day만
+  const days = (typeof currentMapDay!=='undefined' && currentMapDay!=='all')
+    ? allDays.filter(function(d){ return String(d.dayIdx)===currentMapDay; })
+    : allDays;
   let allHtml='';
   days.forEach(function(day){
     let h='<div class="schedule-day">';
@@ -2129,6 +2126,8 @@ function switchMapDay(dayKey){
   } else {
     renderMapPins();
   }
+  // 일정 목록도 같은 Day로 동기화
+  renderSchedule();
 }
 
 function clearPolylines(){
