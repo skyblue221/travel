@@ -846,6 +846,31 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
   </div>
 </div>
 
+<!-- EXPENSE EDIT MODAL -->
+<div class="modal-backdrop" id="expense-edit-modal">
+  <div class="modal">
+    <div class="modal-title">✏️ 지출 수정</div>
+    <div class="modal-label">낸 사람</div>
+    <select class="modal-input" id="ee-payer"></select>
+    <div class="modal-label">카테고리</div>
+    <select class="modal-input" id="ee-cat">
+      <option value="식비">🍽 식비</option>
+      <option value="교통">🚌 교통</option>
+      <option value="숙박">🏨 숙박</option>
+      <option value="쇼핑">🛍 쇼핑</option>
+      <option value="기타">📌 기타</option>
+    </select>
+    <div class="modal-label">내용</div>
+    <input class="modal-input" id="ee-desc" placeholder="예: 점심 식사">
+    <div class="modal-label">금액 (원)</div>
+    <input class="modal-input" id="ee-amount" type="number" placeholder="금액">
+    <div class="modal-btns">
+      <button class="modal-cancel" onclick="closeExpenseEdit()">취소</button>
+      <button class="modal-save" onclick="saveExpenseEdit()">저장</button>
+    </div>
+  </div>
+</div>
+
 <!-- DIARY COMMENT MODAL -->
 <div class="modal-backdrop" id="diary-comment-modal">
   <div class="modal" style="max-height:80vh;display:flex;flex-direction:column">
@@ -1056,6 +1081,8 @@ function openTrip(id){
   document.getElementById('home-screen').classList.add('hidden');
   applySettings(); renderAll();
   fetchData(); // Supabase에서 데이터 로드
+  currentMapDay = 'all';
+  loadAllMapPins(); // 지도 핀/루트 로드
   if(CFG.kakaoKey) loadKakaoMap();
   setSyncStatus(CFG.scriptUrl?'loading':'offline');
   // 노션 바
@@ -1080,11 +1107,10 @@ function loadTripState(id){
   try{ const d=localStorage.getItem('tp-state-'+id); if(d) S=JSON.parse(d); else resetState(); }catch(e){ resetState(); }
   if(!S.diary) S.diary=[];
   if(!S.expenses) S.expenses=[];
-  if(!S.mapPinsData) S.mapPinsData=[];
-  if(!S.dayRoutes) S.dayRoutes={};
+  // mapPinsData/dayRoutes는 더 이상 사용하지 않음 (Supabase map_pins 테이블로 이전됨)
 }
 function saveTripState(id){ localStorage.setItem('tp-state-'+id,JSON.stringify(S)); }
-function resetState(){ S={wish:[],checklist:[],schedule:[],memos:[],diary:[],expenses:[],mapPinsData:[],dayRoutes:{},settings:{tripName:'',dateStart:'',dateEnd:'',members:'min,송송이'}}; }
+function resetState(){ S={wish:[],checklist:[],schedule:[],memos:[],diary:[],expenses:[],settings:{tripName:'',dateStart:'',dateEnd:'',members:'min,송송이'}}; }
 function saveLocal(){ if(currentTripId) saveTripState(currentTripId); }
 
 // ===================== SYNC =====================
@@ -1129,10 +1155,8 @@ async function fetchData(){
       sbFetch('expenses',  'GET', null, 'trip_id=eq.'+tripId+'&order=created_at.asc'),
     ]);
     // Supabase 컬럼명 → 앱 필드명 매핑
-    // 지도 핀/루트는 로컬에만 저장 — Supabase 덮어쓰기 방지
-    const savedMapPinsData = S.mapPinsData||[];
-    const savedDayRoutes   = S.dayRoutes||{};
-    const savedDiary       = S.diary||[];
+    // 일기는 로컬에만 저장 — Supabase 덮어쓰기 방지
+    const savedDiary = S.diary||[];
 
     S.wish      = (wish||[]).map(function(r){ return {id:r.id,type:r.type,text:r.text,done:r.done}; });
     S.checklist = (checklist||[]).map(function(r){ return {id:r.id,cat:r.cat,text:r.text,checked:r.checked}; });
@@ -1140,10 +1164,7 @@ async function fetchData(){
     S.memos     = (memos||[]).map(function(r){ return {id:r.id,title:r.title,body:r.body,createdAt:r.created_at,author:r.author||''}; });
     S.expenses  = (expenses||[]).map(function(r){ return {id:r.id,payer:r.payer,cat:r.cat,desc:r.description,amount:r.amount}; });
 
-    // 로컬 전용 데이터 복원
-    S.mapPinsData = savedMapPinsData;
-    S.dayRoutes   = savedDayRoutes;
-    S.diary       = savedDiary;
+    S.diary = savedDiary;
 
     // trips에 저장된 날짜를 S.settings에 반영
     const trip = trips.find(function(t){ return t.id===tripId; });
@@ -1610,27 +1631,54 @@ function autoAddMapPin(query, dayIdx){
   });
 }
 
+// 핀 1건을 Supabase map_pins에 저장
+async function savePinToSupabase(place, dayIdx){
+  if(!CFG.supabaseUrl||!currentTripId) return null;
+  const row = {
+    id: genId(),
+    trip_id: currentTripId,
+    day_idx: String(dayIdx),
+    name: place.place_name,
+    lat: parseFloat(place.y),
+    lng: parseFloat(place.x),
+    addr: place.road_address_name||place.address_name||'',
+    phone: place.phone||'',
+    category: place.category_name||'',
+    url: place.place_url||'',
+    pin_order: (allPinsCache[String(dayIdx)]||[]).length
+  };
+  try{
+    await sbFetch('map_pins','POST',row);
+  }catch(e){ console.error('pin save error:',e); }
+  return row;
+}
+
 function addPinForDay(place, dayIdx, label){
   if(!kakaoMap) return;
-  const lat=parseFloat(place.y), lng=parseFloat(place.x);
-  const pos=new kakao.maps.LatLng(lat,lng);
-  const marker=new kakao.maps.Marker({map:kakaoMap,position:pos});
   const dayKey=String(dayIdx);
-  if(!S.dayRoutes) S.dayRoutes={};
-  if(!S.dayRoutes[dayKey]) S.dayRoutes[dayKey]={pins:[],hasRoute:false};
-  const pinNum=S.dayRoutes[dayKey].pins.length+1;
-  const infoContent = makePlaceInfoContent(place, pinNum);
-  const info=new kakao.maps.InfoWindow({content:infoContent,removable:true});
-  const pin={name:place.place_name,lat,lng,marker,infoWindow:info,placeData:place};
-  marker.addListener('click',(function(p,num){return function(){ showPlaceCard(p.placeData||{place_name:p.name,road_address_name:p.addr||'',phone:p.phone||'',place_url:p.url||'',category_name:p.category||'',y:String(p.lat),x:String(p.lng)}, num); };})(pin, pinNum));
-  S.dayRoutes[dayKey].pins.push({name:place.place_name,lat,lng,phone:place.phone||'',addr:place.road_address_name||place.address_name||'',url:place.place_url||'',category:place.category_name||''});
-  saveLocal();
-  // 현재 지도에 해당 Day가 선택돼 있으면 핀 목록 갱신
-  if(currentMapDay===dayKey||currentMapDay==='all'){
-    mapPins.push(pin);
-    renderMapPins();
-  }
-  showToast('📍 '+place.place_name+' 지도에 추가됐어요!');
+  savePinToSupabase(place, dayKey).then(function(row){
+    if(!row) return;
+    if(!allPinsCache[dayKey]) allPinsCache[dayKey]=[];
+    allPinsCache[dayKey].push(row);
+    // 현재 보고 있는 Day와 같으면 화면에도 추가
+    if(currentMapDay===dayKey||currentMapDay==='all'){
+      addPinMarkerToMap(row, mapPins.length+1);
+      renderMapPins();
+    }
+    showToast('📍 '+place.place_name+' 지도에 추가됐어요!');
+  });
+}
+
+// Supabase row 형태의 핀을 지도에 마커로 추가
+function addPinMarkerToMap(row, pinNum){
+  if(!kakaoMap) return null;
+  const pos=new kakao.maps.LatLng(row.lat,row.lng);
+  const marker=new kakao.maps.Marker({map:kakaoMap,position:pos});
+  const fakePlace={place_name:row.name,road_address_name:row.addr||'',phone:row.phone||'',place_url:row.url||'',category_name:row.category||'',y:String(row.lat),x:String(row.lng)};
+  const pin={id:row.id,name:row.name,lat:row.lat,lng:row.lng,marker,addr:row.addr||'',phone:row.phone||'',url:row.url||'',category:row.category||'',dayIdx:row.day_idx};
+  marker.addListener('click',(function(p,num){return function(){ showPlaceCard({place_name:p.name,road_address_name:p.addr||'',phone:p.phone||'',place_url:p.url||'',category_name:p.category||'',y:String(p.lat),x:String(p.lng)},num); };})(pin,pinNum));
+  mapPins.push(pin);
+  return pin;
 }
 let editingSchedId = null;
 
@@ -1701,19 +1749,24 @@ async function moveSchedItem(id, direction){
 
 // 일정 📍 탭하면 지도 탭으로 이동 + 해당 위치 포커스
 function goToMapPlace(placeName, schedId){
-  // 지도 탭으로 전환
+  // 일정 항목의 dayIdx를 찾아서 그 Day로 전환
+  const item = S.schedule.find(function(s){ return s.id===schedId; });
+  const targetDay = item ? String(item.dayIdx) : 'all';
   const mapTab = document.querySelector('.tab[onclick*="map"]');
   if(mapTab) { showTab('map', mapTab); }
-  // 해당 장소 핀 찾아서 포커스
   setTimeout(function(){
-    const pinIdx = mapPins.findIndex(function(p){ return p.name===placeName; });
-    if(pinIdx !== -1){
-      focusPin(pinIdx);
-    } else {
-      // 핀 없으면 검색창에 장소명 넣고 검색
-      const inp = document.getElementById('map-search-inp');
-      if(inp){ inp.value = placeName; searchMap(); }
+    if(currentMapDay!==targetDay && allPinsCache && Object.keys(allPinsCache).length){
+      switchMapDay(targetDay);
     }
+    setTimeout(function(){
+      const pinIdx = mapPins.findIndex(function(p){ return p.name===placeName; });
+      if(pinIdx !== -1){
+        focusPin(pinIdx);
+      } else {
+        const inp = document.getElementById('map-search-inp');
+        if(inp){ inp.value = placeName; searchMap(); }
+      }
+    }, 150);
   }, 300);
 }
 
@@ -1856,31 +1909,26 @@ function searchMap(){
   },{size:7});
 }
 
-function addMapPin(place){
+async function addMapPin(place){
   const lat=parseFloat(place.y), lng=parseFloat(place.x);
   const pos=new kakao.maps.LatLng(lat,lng);
   kakaoMap.setCenter(pos); kakaoMap.setLevel(4);
-  const marker=new kakao.maps.Marker({map:kakaoMap,position:pos});
-  const pinNum = mapPins.length+1;
-  const infoContent = makePlaceInfoContent(place, pinNum);
-  const info=new kakao.maps.InfoWindow({content:infoContent,removable:true});
-  info.open(kakaoMap,marker);
-  const pin={name:place.place_name,lat,lng,marker,infoWindow:info,placeData:place};
-  const pinIdx = mapPins.length+1;
-  marker.addListener('click',(function(p,num){ return function(){ showPlaceCard(p.placeData||{place_name:p.name,y:String(p.lat),x:String(p.lng)}, num); }; })(pin, pinIdx));
-  mapPins.push(pin);
   const dayKey = currentMapDay==='all' ? 'all' : currentMapDay;
-  if(!S.dayRoutes) S.dayRoutes={};
-  if(!S.dayRoutes[dayKey]) S.dayRoutes[dayKey]={pins:[],hasRoute:false};
-  S.dayRoutes[dayKey].pins.push({name:place.place_name,lat,lng,phone:place.phone||'',addr:place.road_address_name||place.address_name||'',url:place.place_url||'',category:place.category_name||''});
-  if(dayKey==='all') S.mapPinsData=S.dayRoutes[dayKey].pins;
-  saveLocal();
-  // 검색 결과 닫기
+  const row = await savePinToSupabase(place, dayKey);
+  if(row){
+    if(!allPinsCache[dayKey]) allPinsCache[dayKey]=[];
+    allPinsCache[dayKey].push(row);
+    const pin = addPinMarkerToMap(row, mapPins.length);
+    if(pin && pin.marker){
+      const infoContent = makePlaceInfoContent(place, mapPins.length);
+      const info = new kakao.maps.InfoWindow({content:infoContent,removable:true});
+      info.open(kakaoMap, pin.marker);
+    }
+  }
   document.getElementById('map-search-results').style.display='none';
   document.getElementById('map-search-inp').value='';
   renderMapPins();
   showToast('📍 '+place.place_name+' 추가됐어요!');
-  // 일정 추가 팝업
   openPinScheduleModal(place.place_name, place.category_name||'');
 }
 
@@ -1957,53 +2005,84 @@ function renderMapPins(){
   });
   el.innerHTML=html;
 }
-function removePin(idx){
-  mapPins[idx].marker.setMap(null);
+
+async function removePin(idx){
+  const pin = mapPins[idx];
+  if(!pin) return;
+  if(pin.marker) pin.marker.setMap(null);
   mapPins.splice(idx,1);
-  syncPinsToState();
+  // 캐시에서도 제거
+  const dayKey = pin.dayIdx || (currentMapDay==='all'?'all':currentMapDay);
+  Object.keys(allPinsCache).forEach(function(k){
+    allPinsCache[k] = (allPinsCache[k]||[]).filter(function(p){ return p.id!==pin.id; });
+  });
   updatePinMarkers();
   renderMapPins();
+  if(CFG.supabaseUrl && pin.id){
+    sbFetch('map_pins','DELETE',null,'id=eq.'+pin.id).catch(function(e){ console.error(e); });
+  }
 }
-function movePinUp(idx){
+
+async function movePinUp(idx){
   if(idx===0) return;
   const tmp=mapPins[idx]; mapPins[idx]=mapPins[idx-1]; mapPins[idx-1]=tmp;
-  syncPinsToState();
+  await syncPinOrder();
   updatePinMarkers();
   renderMapPins();
 }
-function movePinDown(idx){
+async function movePinDown(idx){
   if(idx===mapPins.length-1) return;
   const tmp=mapPins[idx]; mapPins[idx]=mapPins[idx+1]; mapPins[idx+1]=tmp;
-  syncPinsToState();
+  await syncPinOrder();
   updatePinMarkers();
   renderMapPins();
 }
-function syncPinsToState(){
-  const key = currentMapDay==='all' ? 'all' : currentMapDay;
-  if(!S.dayRoutes) S.dayRoutes={};
-  if(!S.dayRoutes[key]) S.dayRoutes[key]={pins:[],hasRoute:false};
-  S.dayRoutes[key].pins = mapPins.map(function(p){return {name:p.name,lat:p.lat,lng:p.lng};});
-  if(key==='all') S.mapPinsData = S.dayRoutes[key].pins;
-  saveLocal();
+
+// 현재 mapPins 순서를 pin_order로 Supabase에 반영
+async function syncPinOrder(){
+  if(!CFG.supabaseUrl) return;
+  const updates = mapPins.map(function(p,i){
+    return sbFetch('map_pins','PATCH',{pin_order:i},'id=eq.'+p.id).catch(function(e){});
+  });
+  await Promise.all(updates);
 }
+
 function updatePinMarkers(){
-  // 마커 번호 라벨 업데이트 (기존 마커 제거 후 재생성)
   mapPins.forEach(function(p,i){
     if(p.marker) p.marker.setMap(null);
     if(!kakaoMap) return;
     const pos = new kakao.maps.LatLng(p.lat, p.lng);
     p.marker = new kakao.maps.Marker({ map: kakaoMap, position: pos });
-    const info = new kakao.maps.InfoWindow({
-      content: '<div style="padding:4px 8px;font-size:11px;font-family:sans-serif">'+(i+1)+'. '+p.name+'</div>'
-    });
-    p.infoWindow = info;
     p.marker.addListener('click', (function(pin,num){ return function(){ showPlaceCard({place_name:pin.name,road_address_name:pin.addr||'',phone:pin.phone||'',place_url:pin.url||'',category_name:pin.category||'',y:String(pin.lat),x:String(pin.lng)},num); }; })(p,i+1));
   });
 }
+
+// 전체 핀 캐시 — { dayIdx: [row, row, ...] }
+let allPinsCache = {};
+let allRoutesCache = {}; // { dayIdx: true/false }
+
+// Supabase에서 이 여행의 모든 핀 + 루트 정보 불러오기
+async function loadAllMapPins(){
+  if(!CFG.supabaseUrl||!currentTripId){ allPinsCache={}; allRoutesCache={}; return; }
+  try{
+    const pins = await sbFetch('map_pins','GET',null,'trip_id=eq.'+currentTripId+'&order=pin_order.asc');
+    allPinsCache = {};
+    (pins||[]).forEach(function(p){
+      const k = p.day_idx||'all';
+      if(!allPinsCache[k]) allPinsCache[k]=[];
+      allPinsCache[k].push(p);
+    });
+    const routes = await sbFetch('map_routes','GET',null,'trip_id=eq.'+currentTripId);
+    allRoutesCache = {};
+    (routes||[]).forEach(function(r){ allRoutesCache[r.day_idx] = r.has_route; });
+  }catch(e){ console.error('핀 로드 오류:',e); }
+}
+
 function restoreMapPins(){
   if(!kakaoMap) return;
   switchMapDay(currentMapDay);
 }
+
 function renderMapDayTabs(){
   const tabsEl = document.getElementById('map-day-tabs');
   if(!tabsEl) return;
@@ -2027,40 +2106,24 @@ function renderMapDayTabs(){
 function switchMapDay(dayKey){
   currentMapDay = String(dayKey);
   renderMapDayTabs();
-  // 현재 day의 핀 복원
   mapPins.forEach(function(p){ if(p.marker) p.marker.setMap(null); });
   mapPins = [];
   clearPolylines();
-  const key = currentMapDay==='all' ? 'all' : currentMapDay;
-  // 전체 탭이면 모든 Day 핀 합치기
+  const key = currentMapDay;
   let pinsData = [];
   if(key==='all'){
-    if(S.dayRoutes){
-      Object.keys(S.dayRoutes).forEach(function(dk){
-        if(dk!=='all' && S.dayRoutes[dk].pins){
-          S.dayRoutes[dk].pins.forEach(function(p){ pinsData.push(p); });
-        }
-      });
-    }
-    // dayRoutes에 없으면 mapPinsData 사용
-    if(!pinsData.length) pinsData = S.mapPinsData||[];
+    Object.keys(allPinsCache).forEach(function(dk){
+      pinsData = pinsData.concat(allPinsCache[dk]||[]);
+    });
   } else {
-    pinsData = (S.dayRoutes&&S.dayRoutes[key]&&S.dayRoutes[key].pins)||[];
+    pinsData = allPinsCache[key]||[];
   }
   if(pinsData.length && kakaoMap){
-    pinsData.forEach(function(pd,i){
-      const pos=new kakao.maps.LatLng(pd.lat,pd.lng);
-      const marker=new kakao.maps.Marker({map:kakaoMap,position:pos});
-      const fakePlace={place_name:pd.name,road_address_name:pd.addr||'',phone:pd.phone||'',place_url:pd.url||'',category_name:pd.category||'',y:String(pd.lat),x:String(pd.lng)};
-      const infoContent=makePlaceInfoContent(fakePlace,i+1);
-      const info=new kakao.maps.InfoWindow({content:infoContent,removable:true});
-      const pin={name:pd.name,lat:pd.lat,lng:pd.lng,marker,infoWindow:info,addr:pd.addr||'',phone:pd.phone||'',url:pd.url||'',category:pd.category||''};
-      const pidx = mapPins.length+1;
-      marker.addListener('click',(function(p,num){return function(){ showPlaceCard({place_name:p.name,road_address_name:p.addr||'',phone:p.phone||'',place_url:p.url||'',category_name:p.category||'',y:String(p.lat),x:String(p.lng)},num); };})(pin,pidx));
-      mapPins.push(pin);
+    pinsData.forEach(function(row, i){
+      addPinMarkerToMap(row, i+1);
     });
     renderMapPins();
-    if(key!=='all'&&S.dayRoutes&&S.dayRoutes[key]&&S.dayRoutes[key].hasRoute){
+    if(key!=='all'&&allRoutesCache[key]){
       drawRouteLines();
     }
   } else {
@@ -2085,26 +2148,30 @@ function drawRouteLines(){
   kakaoMap.setBounds(bounds);
 }
 
-function drawRoute(){
+async function drawRoute(){
   if(!kakaoMap||mapPins.length<2){ showToast('핀을 2개 이상 추가해야 루트를 그릴 수 있어요'); return; }
   drawRouteLines();
-  // Day별 루트 저장
-  const key = currentMapDay==='all' ? 'all' : currentMapDay;
-  if(!S.dayRoutes) S.dayRoutes={};
-  if(!S.dayRoutes[key]) S.dayRoutes[key]={pins:[]};
-  S.dayRoutes[key].hasRoute=true;
-  S.dayRoutes[key].pins=mapPins.map(function(p){return {name:p.name,lat:p.lat,lng:p.lng};});
-  if(currentMapDay==='all') S.mapPinsData=S.dayRoutes[key].pins;
-  saveLocal();
+  const key = currentMapDay;
+  allRoutesCache[key] = true;
   showToast('🛣️ 루트가 저장됐어요!');
+  if(CFG.supabaseUrl && currentTripId && key!=='all'){
+    try{
+      await sbFetch('map_routes','POST',{trip_id:currentTripId,day_idx:key,has_route:true});
+    }catch(e){
+      // 이미 있으면 업데이트
+      sbFetch('map_routes','PATCH',{has_route:true},'trip_id=eq.'+currentTripId+'&day_idx=eq.'+key).catch(function(e2){});
+    }
+  }
 }
 
-function clearRoute(){
+async function clearRoute(){
   clearPolylines();
-  const key = currentMapDay==='all' ? 'all' : currentMapDay;
-  if(S.dayRoutes&&S.dayRoutes[key]) S.dayRoutes[key].hasRoute=false;
-  saveLocal();
+  const key = currentMapDay;
+  allRoutesCache[key] = false;
   showToast('루트를 지웠어요');
+  if(CFG.supabaseUrl && currentTripId && key!=='all'){
+    sbFetch('map_routes','PATCH',{has_route:false},'trip_id=eq.'+currentTripId+'&day_idx=eq.'+key).catch(function(e){});
+  }
 }
 
 // ===================== MEMO =====================
@@ -2440,6 +2507,52 @@ function addExpense(){
   // Supabase 저장
   postData({action:'addRow',sheet:'예산',row:{id:row.id,payer:row.payer,cat:row.cat,desc:row.desc,amount:row.amount}});
 }
+let editingExpenseId = null;
+
+function openExpenseEdit(id){
+  const item = S.expenses.find(function(e){ return e.id===id; });
+  if(!item) return;
+  editingExpenseId = id;
+  // 낸 사람 select 채우기
+  const payerSel = document.getElementById('ee-payer');
+  payerSel.innerHTML = CFG.members.map(function(m){ return '<option value="'+m+'">'+m+'</option>'; }).join('');
+  payerSel.value = item.payer;
+  document.getElementById('ee-cat').value = item.cat;
+  document.getElementById('ee-desc').value = item.desc;
+  document.getElementById('ee-amount').value = item.amount;
+  document.getElementById('expense-edit-modal').classList.add('open');
+}
+
+function closeExpenseEdit(){
+  document.getElementById('expense-edit-modal').classList.remove('open');
+  editingExpenseId = null;
+}
+
+async function saveExpenseEdit(){
+  if(!editingExpenseId) return;
+  const item = S.expenses.find(function(e){ return e.id===editingExpenseId; });
+  if(!item) return;
+  const desc = document.getElementById('ee-desc').value.trim();
+  const amount = parseInt(document.getElementById('ee-amount').value)||0;
+  if(!desc||!amount){ showToast('내용과 금액을 입력해주세요'); return; }
+  item.payer  = document.getElementById('ee-payer').value;
+  item.cat    = document.getElementById('ee-cat').value;
+  item.desc   = desc;
+  item.amount = amount;
+  closeExpenseEdit();
+  saveLocal();
+  renderBudget();
+  if(CFG.supabaseUrl){
+    sbFetch('expenses','PATCH',{
+      payer: item.payer,
+      cat: item.cat,
+      description: item.desc,
+      amount: item.amount
+    },'id=eq.'+item.id).catch(function(e){ console.error(e); });
+  }
+  showToast('지출이 수정됐어요 ✅');
+}
+
 async function deleteExpense(id){
   const item=S.expenses.find(e=>e.id===id); if(!item) return;
   const ok=await showConfirm('삭제하시겠어요?', '"'+item.desc+'" ('+item.amount.toLocaleString('ko-KR')+'원)을 삭제해요.');
@@ -2458,7 +2571,28 @@ function renderBudget(){
   // 지출 목록
   const list=document.getElementById('expense-list');
   if(!S.expenses.length){ list.innerHTML='<div style="text-align:center;padding:20px;color:var(--text3);font-size:13px">지출 내역이 없어요</div>'; }
-  else{ list.innerHTML=S.expenses.map(e=>`<div class="expense-item"><span class="expense-payer">${e.payer}</span><span class="expense-desc">${e.desc}</span><span class="expense-cat-badge ${ecatMap[e.cat]||'ecat-etc'}">${e.cat}</span><span class="expense-amount">${fmt(e.amount)}</span><span class="expense-del" onclick="deleteExpense('${e.id}')">×</span></div>`).join(''); }
+  else{
+    list.innerHTML='';
+    S.expenses.forEach(function(e){
+      const item=document.createElement('div');
+      item.className='expense-item';
+      item.innerHTML='<span class="expense-payer">'+e.payer+'</span>'
+        +'<span class="expense-desc">'+e.desc+'</span>'
+        +'<span class="expense-cat-badge '+(ecatMap[e.cat]||'ecat-etc')+'">'+e.cat+'</span>'
+        +'<span class="expense-amount">'+fmt(e.amount)+'</span>';
+      const editBtn=document.createElement('span');
+      editBtn.textContent='✏️';
+      editBtn.style.cssText='cursor:pointer;font-size:12px;padding:0 3px;color:var(--accent2)';
+      editBtn.onclick=(function(id){return function(){openExpenseEdit(id);};})(e.id);
+      const delBtn=document.createElement('span');
+      delBtn.className='expense-del';
+      delBtn.textContent='×';
+      delBtn.onclick=(function(id){return function(){deleteExpense(id);};})(e.id);
+      item.appendChild(editBtn);
+      item.appendChild(delBtn);
+      list.appendChild(item);
+    });
+  }
   renderSettle();
 }
 function renderSettle(){
