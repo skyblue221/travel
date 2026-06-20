@@ -1717,7 +1717,7 @@ async function saveSchedEdit(){
   item.cat     = document.getElementById('se-cat').value;
   closeSchedEdit();
   saveLocal();
-  renderSchedule();
+  refreshScheduleAndMap();
   // Supabase 업데이트 — 실패하면 사용자에게 알림
   if(CFG.supabaseUrl && itemId){
     try{
@@ -1760,7 +1760,7 @@ async function moveSchedItem(id, direction){
   S.schedule[idxA] = S.schedule[idxB];
   S.schedule[idxB] = tmp;
   saveLocal();
-  renderSchedule();
+  refreshScheduleAndMap();
 }
 
 // 일정 📍 탭하면 지도 탭으로 이동 + 해당 위치 포커스
@@ -1787,10 +1787,15 @@ async function deleteSchedItem(id){
   const item=S.schedule.find(s=>s.id===id); if(!item) return;
   const ok=await showConfirm('삭제하시겠어요?', '"'+item.content+'"을(를) 삭제해요.');
   if(!ok) return;
-  S.schedule=S.schedule.filter(s=>s.id!==id); renderSchedule();
+  S.schedule=S.schedule.filter(s=>s.id!==id); refreshScheduleAndMap();
   await postData({action:'deleteRow',sheet:'일정',id});
 }
 const catMap={'식사':'cat-meal','이동':'cat-move','관광':'cat-see','숙소':'cat-stay','기타':'cat-etc'};
+function refreshScheduleAndMap(){
+  if(kakaoMap){ switchMapDay(currentMapDay); } // 핀 재정렬 + 일정 동기화까지 한번에
+  else { renderSchedule(); }
+}
+
 function renderSchedule(){
   const container=document.getElementById('schedule-container'), allDays=getDayGroups();
   if(!allDays.length){ container.innerHTML='<div style="padding:28px;text-align:center;color:var(--text3);font-size:13px;line-height:2">+ 날짜 추가를 눌러<br>일정을 만들어요 🗓️</div>'; return; }
@@ -1817,11 +1822,7 @@ function renderSchedule(){
       h+='<div class="schedule-content-wrap">';
       h+='<span class="schedule-content">'+item.content+'</span>';
       if(item.place){
-        const dayKeyForPin = String(item.dayIdx);
-        const pinsOfDay = (allPinsCache && allPinsCache[dayKeyForPin]) || [];
-        const pinIdxInDay = pinsOfDay.findIndex(function(p){ return p.name===item.place; });
-        const pinNumBadge = pinIdxInDay!==-1 ? '<span class="schedule-pin-num">'+(pinIdxInDay+1)+'</span>' : '';
-        h+='<span class="schedule-place" style="cursor:pointer" onclick="goToMapPlace(\''+item.place+'\',\''+item.id+'\')" title="지도에서 보기">'+pinNumBadge+' 📍 '+item.place+'</span>';
+        h+='<span class="schedule-place" style="cursor:pointer" onclick="goToMapPlace(\''+item.place+'\',\''+item.id+'\')" title="지도에서 보기">📍 '+item.place+'</span>';
       }
       h+='</div>';
       h+='<span class="schedule-category '+(catMap[item.cat]||'cat-etc')+'">'+item.cat+'</span>';
@@ -2141,6 +2142,28 @@ function renderMapDayTabs(){
   });
 }
 
+// 일정에 적힌 장소(place) 순서대로 핀 배열을 재정렬
+function reorderPinsBySchedule(dayKey, pins){
+  if(dayKey==='all') return pins; // 전체보기는 정렬 기준 Day가 없으므로 그대로
+  const days = getDayGroups();
+  const day = days.find(function(d){ return String(d.dayIdx)===dayKey; });
+  if(!day) return pins;
+  // 일정에서 장소가 있는 항목들의 순서(시간순 정렬 반영된 순서) 추출
+  const placeOrder = day.items
+    .filter(function(i){ return i.content && i.place; })
+    .map(function(i){ return i.place; });
+  if(!placeOrder.length) return pins;
+  const sorted = [];
+  const used = {};
+  placeOrder.forEach(function(placeName){
+    const idx = pins.findIndex(function(p,i){ return p.name===placeName && !used[i]; });
+    if(idx!==-1){ used[idx]=true; sorted.push(pins[idx]); }
+  });
+  // 일정에 없는(매칭 안 된) 핀은 뒤에 그대로 붙임
+  pins.forEach(function(p,i){ if(!used[i]) sorted.push(p); });
+  return sorted;
+}
+
 function switchMapDay(dayKey){
   currentMapDay = String(dayKey);
   renderMapDayTabs();
@@ -2155,6 +2178,11 @@ function switchMapDay(dayKey){
     });
   } else {
     pinsData = allPinsCache[key]||[];
+    const before = pinsData.map(function(p){return p.id;}).join(',');
+    pinsData = reorderPinsBySchedule(key, pinsData);
+    const after = pinsData.map(function(p){return p.id;}).join(',');
+    allPinsCache[key] = pinsData; // 정렬된 순서를 캐시에도 반영
+    var orderChanged = (before !== after);
   }
   if(pinsData.length && kakaoMap){
     pinsData.forEach(function(row, i){
@@ -2164,6 +2192,8 @@ function switchMapDay(dayKey){
     if(key!=='all'&&allRoutesCache[key]){
       drawRouteLines();
     }
+    // 순서가 실제로 바뀐 경우에만 Supabase pin_order 업데이트
+    if(key!=='all' && orderChanged) syncPinOrder();
   } else {
     renderMapPins();
   }
