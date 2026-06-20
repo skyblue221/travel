@@ -154,8 +154,7 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 .sched-input{flex:1;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;font-family:inherit;outline:none;background:var(--bg);color:var(--text)}
 .sched-input:focus{border-color:var(--accent)}
 .schedule-content-wrap{display:flex;flex-direction:column;flex:1;min-width:0;gap:2px}
-.schedule-place{font-size:10px;color:var(--accent2);font-weight:500;display:inline-flex;align-items:center;gap:3px}
-.schedule-pin-num{display:inline-flex;align-items:center;justify-content:center;background:var(--accent);color:white;border-radius:50%;width:14px;height:14px;font-size:9px;font-weight:600;flex-shrink:0}
+.schedule-place{font-size:10px;color:var(--accent2);font-weight:500}
 .place-search-wrap{position:relative;flex:2}
 .place-dropdown{position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1.5px solid var(--accent2);border-radius:8px;z-index:50;max-height:180px;overflow-y:auto;box-shadow:var(--shadow);margin-top:2px}
 .place-dropdown-item{padding:9px 12px;font-size:12px;color:var(--text);cursor:pointer;border-bottom:1px solid var(--border);line-height:1.4}
@@ -604,14 +603,17 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
           <div id="mpc-category" style="font-size:11px;color:var(--text3);margin-bottom:5px"></div>
           <div id="mpc-addr" style="font-size:12px;color:var(--text2);line-height:1.5;margin-bottom:3px"></div>
           <div id="mpc-phone" style="font-size:12px;color:var(--text2);margin-bottom:8px"></div>
-          <a id="mpc-link" href="#" target="_blank" style="display:inline-block;background:#FFCD00;color:#333;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:500;text-decoration:none">카카오맵에서 보기 →</a>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            <a id="mpc-link" href="#" target="_blank" style="display:inline-block;background:#FFCD00;color:#333;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:500;text-decoration:none">카카오맵에서 보기 →</a>
+            <button id="mpc-add-sched-btn" onclick="addCurrentCardToSchedule()" style="background:var(--accent3);color:var(--accent);border:1px solid var(--accent);border-radius:6px;padding:5px 12px;font-size:12px;font-weight:500;cursor:pointer">🗓️ 일정에 추가</button>
+            <button id="mpc-delete-btn" onclick="deleteCurrentCardPin()" style="background:#fdecec;color:#c0392b;border:1px solid #f0b8b8;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:500;cursor:pointer">🗑️ 핀 삭제</button>
+          </div>
         </div>
         <button onclick="document.getElementById('map-place-card').style.display='none'" style="background:none;border:none;font-size:18px;color:var(--text3);cursor:pointer;flex-shrink:0;padding:0">×</button>
       </div>
     </div>
     <div id="map-search-results" style="display:none;margin-bottom:10px;border:1.5px solid var(--accent2);border-radius:10px;overflow:hidden;background:var(--surface);max-height:220px;overflow-y:auto"></div>
-    <!-- 핀 목록 없음 — 일정 목록에 통합 표시 -->
-    <div id="map-pins" style="display:none"></div>
+    <div class="map-pins" id="map-pins"></div>
     <div style="display:flex;gap:8px;margin-top:8px;margin-bottom:14px">
       <button class="map-route-btn" style="flex:3;white-space:nowrap" onclick="drawRoute()">🛣️ 루트 그리기</button>
       <button class="map-route-btn" style="flex:1;white-space:nowrap" onclick="clearRoute()">🗑️ 루트 지우기</button>
@@ -1129,23 +1131,14 @@ async function sbFetch(table, method, body, query){
       'apikey': CFG.supabaseKey,
       'Authorization': 'Bearer ' + CFG.supabaseKey,
       'Content-Type': 'application/json',
-      'Prefer': (method==='POST'||method==='PATCH') ? 'return=representation' : ''
+      'Prefer': method==='POST' ? 'return=representation' : ''
     }
   };
   if(body) opts.body = JSON.stringify(body);
   const res = await fetch(url, opts);
-  if(!res.ok){
-    let e;
-    try{ e = await res.json(); }catch(_){ e = {message: res.status+' '+res.statusText}; }
-    throw new Error(JSON.stringify(e));
-  }
+  if(!res.ok){ const e=await res.json(); throw new Error(JSON.stringify(e)); }
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
-  // PATCH인데 일치하는 row가 없으면 빈 배열이 옴 — 이건 실제로는 "업데이트 안 됨"이므로 알려야 함
-  if(method==='PATCH' && Array.isArray(data) && data.length===0){
-    throw new Error('PATCH matched 0 rows (id/RLS 확인 필요): '+url);
-  }
-  return data;
+  return text ? JSON.parse(text) : null;
 }
 
 async function fetchData(){
@@ -1588,6 +1581,7 @@ function hidePlaceDropdown(dayIdx){
 }
 
 // ── 핀 클릭 → 지도 중심 이동 ──
+let currentCardPinIdx = -1;
 function focusPin(idx){
   if(!kakaoMap||!mapPins[idx]) return;
   const p = mapPins[idx];
@@ -1596,22 +1590,45 @@ function focusPin(idx){
   kakaoMap.setLevel(4);
   // 상세 카드 표시
   const fakePlace = {place_name:p.name, category_name:p.category||'', road_address_name:p.addr||'', phone:p.phone||'', place_url:p.url||'', y:String(p.lat), x:String(p.lng)};
-  showPlaceCard(fakePlace, idx+1);
+  showPlaceCard(fakePlace, idx+1, idx);
 }
 
 // ── 장소 상세 카드 표시 ──
-function showPlaceCard(place, pinNum){
+function showPlaceCard(place, pinNum, pinIdx){
   const name = place.place_name||place.name||'';
   const category = place.category_name||place.category||'';
   const addr = place.road_address_name||place.address_name||place.addr||'';
   const phone = place.phone||'';
   const url = place.place_url||place.url||('https://map.kakao.com/link/map/'+encodeURIComponent(name)+','+place.y+','+place.x);
+  currentCardPinIdx = (typeof pinIdx === 'number') ? pinIdx : -1;
   document.getElementById('mpc-name').textContent = pinNum+'. '+name;
   document.getElementById('mpc-category').textContent = category;
   document.getElementById('mpc-addr').textContent = addr ? '📍 '+addr : '';
   document.getElementById('mpc-phone').textContent = phone ? '📞 '+phone : '';
   document.getElementById('mpc-link').href = url;
+  // 이미 저장된 핀(mapPins에 존재)일 때만 추가/삭제 버튼 노출
+  const addBtn = document.getElementById('mpc-add-sched-btn');
+  const delBtn = document.getElementById('mpc-delete-btn');
+  if(addBtn) addBtn.style.display = currentCardPinIdx>=0 ? 'inline-block' : 'none';
+  if(delBtn) delBtn.style.display = currentCardPinIdx>=0 ? 'inline-block' : 'none';
   document.getElementById('map-place-card').style.display = 'block';
+}
+
+// 카드의 "🗑️ 핀 삭제" 버튼
+function deleteCurrentCardPin(){
+  if(currentCardPinIdx<0) return;
+  if(!confirm('이 핀을 지도에서 삭제할까요?\n(일정에 있는 항목은 그대로 남아요)')) return;
+  removePin(currentCardPinIdx);
+  document.getElementById('map-place-card').style.display = 'none';
+  currentCardPinIdx = -1;
+}
+
+// 카드의 "🗓️ 일정에 추가" 버튼
+function addCurrentCardToSchedule(){
+  if(currentCardPinIdx<0) return;
+  const pin = mapPins[currentCardPinIdx];
+  if(!pin) return;
+  openPinScheduleModal(pin.name, pin.category||'');
 }
 // 하위 호환용 (infoWindow content 없이 심플 말풍선)
 function makePlaceInfoContent(place, pinNum){
@@ -1672,7 +1689,6 @@ function addPinForDay(place, dayIdx, label){
       addPinMarkerToMap(row, mapPins.length+1);
       renderMapPins();
     }
-    renderSchedule(); // 핀 번호 뱃지 반영
     showToast('📍 '+place.place_name+' 지도에 추가됐어요!');
   });
 }
@@ -1684,7 +1700,11 @@ function addPinMarkerToMap(row, pinNum){
   const marker=new kakao.maps.Marker({map:kakaoMap,position:pos});
   const fakePlace={place_name:row.name,road_address_name:row.addr||'',phone:row.phone||'',place_url:row.url||'',category_name:row.category||'',y:String(row.lat),x:String(row.lng)};
   const pin={id:row.id,name:row.name,lat:row.lat,lng:row.lng,marker,addr:row.addr||'',phone:row.phone||'',url:row.url||'',category:row.category||'',dayIdx:row.day_idx};
-  marker.addListener('click',(function(p,num){return function(){ showPlaceCard({place_name:p.name,road_address_name:p.addr||'',phone:p.phone||'',place_url:p.url||'',category_name:p.category||'',y:String(p.lat),x:String(p.lng)},num); };})(pin,pinNum));
+  marker.addListener('click',(function(p){return function(){
+    const liveIdx = mapPins.findIndex(function(x){ return x.id===p.id; });
+    const num = liveIdx>=0 ? liveIdx+1 : 1;
+    showPlaceCard({place_name:p.name,road_address_name:p.addr||'',phone:p.phone||'',place_url:p.url||'',category_name:p.category||'',y:String(p.lat),x:String(p.lng)},num,liveIdx);
+  };})(pin));
   mapPins.push(pin);
   return pin;
 }
@@ -1710,31 +1730,23 @@ async function saveSchedEdit(){
   if(!editingSchedId) return;
   const item = S.schedule.find(function(s){ return s.id===editingSchedId; });
   if(!item) return;
-  const itemId = item.id;
   item.time    = document.getElementById('se-time').value.trim();
   item.content = document.getElementById('se-content').value.trim();
   item.place   = document.getElementById('se-place').value.trim();
   item.cat     = document.getElementById('se-cat').value;
   closeSchedEdit();
   saveLocal();
-  refreshScheduleAndMap();
-  // Supabase 업데이트 — 실패하면 사용자에게 알림
-  if(CFG.supabaseUrl && itemId){
-    try{
-      await sbFetch('schedule','PATCH',{
-        time: item.time,
-        content: item.content,
-        place: item.place,
-        cat: item.cat
-      },'id=eq.'+itemId);
-      showToast('일정이 수정됐어요 ✅');
-    }catch(e){
-      console.error('일정 수정 저장 실패:', e);
-      showToast('⚠️ 서버 저장 실패 — 다시 시도해주세요');
-    }
-  } else {
-    showToast('일정이 수정됐어요 ✅ (로컬에만 저장됨)');
+  renderSchedule();
+  // Supabase 업데이트
+  if(CFG.supabaseUrl && editingSchedId){
+    sbFetch('schedule','PATCH',{
+      time: item.time,
+      content: item.content,
+      place: item.place,
+      cat: item.cat
+    },'id=eq.'+item.id).catch(function(e){ console.error(e); });
   }
+  showToast('일정이 수정됐어요 ✅');
 }
 
 // 일정 순서 이동 (같은 Day 안에서)
@@ -1760,7 +1772,7 @@ async function moveSchedItem(id, direction){
   S.schedule[idxA] = S.schedule[idxB];
   S.schedule[idxB] = tmp;
   saveLocal();
-  refreshScheduleAndMap();
+  renderSchedule();
 }
 
 // 일정 📍 탭하면 지도 탭으로 이동 + 해당 위치 포커스
@@ -1787,15 +1799,10 @@ async function deleteSchedItem(id){
   const item=S.schedule.find(s=>s.id===id); if(!item) return;
   const ok=await showConfirm('삭제하시겠어요?', '"'+item.content+'"을(를) 삭제해요.');
   if(!ok) return;
-  S.schedule=S.schedule.filter(s=>s.id!==id); refreshScheduleAndMap();
+  S.schedule=S.schedule.filter(s=>s.id!==id); renderSchedule();
   await postData({action:'deleteRow',sheet:'일정',id});
 }
 const catMap={'식사':'cat-meal','이동':'cat-move','관광':'cat-see','숙소':'cat-stay','기타':'cat-etc'};
-function refreshScheduleAndMap(){
-  if(kakaoMap){ switchMapDay(currentMapDay); } // 핀 재정렬 + 일정 동기화까지 한번에
-  else { renderSchedule(); }
-}
-
 function renderSchedule(){
   const container=document.getElementById('schedule-container'), allDays=getDayGroups();
   if(!allDays.length){ container.innerHTML='<div style="padding:28px;text-align:center;color:var(--text3);font-size:13px;line-height:2">+ 날짜 추가를 눌러<br>일정을 만들어요 🗓️</div>'; return; }
@@ -1821,9 +1828,7 @@ function renderSchedule(){
       h+='<span class="schedule-time">'+(item.time||'──')+'</span>';
       h+='<div class="schedule-content-wrap">';
       h+='<span class="schedule-content">'+item.content+'</span>';
-      if(item.place){
-        h+='<span class="schedule-place" style="cursor:pointer" onclick="goToMapPlace(\''+item.place+'\',\''+item.id+'\')" title="지도에서 보기">📍 '+item.place+'</span>';
-      }
+      if(item.place){ h+='<span class="schedule-place" style="cursor:pointer" onclick="goToMapPlace(\''+item.place+'\',\''+item.id+'\')" title="지도에서 보기">📍 '+item.place+'</span>'; }
       h+='</div>';
       h+='<span class="schedule-category '+(catMap[item.cat]||'cat-etc')+'">'+item.cat+'</span>';
       // 순서 버튼
@@ -1952,7 +1957,6 @@ async function addMapPin(place){
   document.getElementById('map-search-results').style.display='none';
   document.getElementById('map-search-inp').value='';
   renderMapPins();
-  renderSchedule(); // 핀 번호 뱃지 반영
   showToast('📍 '+place.place_name+' 추가됐어요!');
   openPinScheduleModal(place.place_name, place.category_name||'');
 }
@@ -2043,7 +2047,6 @@ async function removePin(idx){
   });
   updatePinMarkers();
   renderMapPins();
-  renderSchedule(); // 핀 번호 뱃지 갱신
   if(CFG.supabaseUrl && pin.id){
     sbFetch('map_pins','DELETE',null,'id=eq.'+pin.id).catch(function(e){ console.error(e); });
   }
@@ -2052,28 +2055,16 @@ async function removePin(idx){
 async function movePinUp(idx){
   if(idx===0) return;
   const tmp=mapPins[idx]; mapPins[idx]=mapPins[idx-1]; mapPins[idx-1]=tmp;
-  syncPinCacheOrder();
   await syncPinOrder();
   updatePinMarkers();
   renderMapPins();
-  renderSchedule();
 }
 async function movePinDown(idx){
   if(idx===mapPins.length-1) return;
   const tmp=mapPins[idx]; mapPins[idx]=mapPins[idx+1]; mapPins[idx+1]=tmp;
-  syncPinCacheOrder();
   await syncPinOrder();
   updatePinMarkers();
   renderMapPins();
-  renderSchedule();
-}
-
-// mapPins의 현재 순서를 allPinsCache에도 반영 (일정 뱃지 번호 계산용)
-function syncPinCacheOrder(){
-  if(currentMapDay==='all') return; // 전체 보기에서는 순서 동기화 생략
-  allPinsCache[currentMapDay] = mapPins.map(function(p){
-    return {id:p.id,name:p.name,lat:p.lat,lng:p.lng,addr:p.addr,phone:p.phone,url:p.url,category:p.category,day_idx:currentMapDay};
-  });
 }
 
 // 현재 mapPins 순서를 pin_order로 Supabase에 반영
@@ -2091,7 +2082,11 @@ function updatePinMarkers(){
     if(!kakaoMap) return;
     const pos = new kakao.maps.LatLng(p.lat, p.lng);
     p.marker = new kakao.maps.Marker({ map: kakaoMap, position: pos });
-    p.marker.addListener('click', (function(pin,num){ return function(){ showPlaceCard({place_name:pin.name,road_address_name:pin.addr||'',phone:pin.phone||'',place_url:pin.url||'',category_name:pin.category||'',y:String(pin.lat),x:String(pin.lng)},num); }; })(p,i+1));
+    p.marker.addListener('click', (function(pin){ return function(){
+      const liveIdx = mapPins.findIndex(function(x){ return x.id===pin.id; });
+      const num = liveIdx>=0 ? liveIdx+1 : 1;
+      showPlaceCard({place_name:pin.name,road_address_name:pin.addr||'',phone:pin.phone||'',place_url:pin.url||'',category_name:pin.category||'',y:String(pin.lat),x:String(pin.lng)},num,liveIdx);
+    }; })(p));
   });
 }
 
@@ -2113,7 +2108,6 @@ async function loadAllMapPins(){
     const routes = await sbFetch('map_routes','GET',null,'trip_id=eq.'+currentTripId);
     allRoutesCache = {};
     (routes||[]).forEach(function(r){ allRoutesCache[r.day_idx] = r.has_route; });
-    renderSchedule(); // 핀 번호 뱃지 반영
   }catch(e){ console.error('핀 로드 오류:',e); }
 }
 
@@ -2142,28 +2136,6 @@ function renderMapDayTabs(){
   });
 }
 
-// 일정에 적힌 장소(place) 순서대로 핀 배열을 재정렬
-function reorderPinsBySchedule(dayKey, pins){
-  if(dayKey==='all') return pins; // 전체보기는 정렬 기준 Day가 없으므로 그대로
-  const days = getDayGroups();
-  const day = days.find(function(d){ return String(d.dayIdx)===dayKey; });
-  if(!day) return pins;
-  // 일정에서 장소가 있는 항목들의 순서(시간순 정렬 반영된 순서) 추출
-  const placeOrder = day.items
-    .filter(function(i){ return i.content && i.place; })
-    .map(function(i){ return i.place; });
-  if(!placeOrder.length) return pins;
-  const sorted = [];
-  const used = {};
-  placeOrder.forEach(function(placeName){
-    const idx = pins.findIndex(function(p,i){ return p.name===placeName && !used[i]; });
-    if(idx!==-1){ used[idx]=true; sorted.push(pins[idx]); }
-  });
-  // 일정에 없는(매칭 안 된) 핀은 뒤에 그대로 붙임
-  pins.forEach(function(p,i){ if(!used[i]) sorted.push(p); });
-  return sorted;
-}
-
 function switchMapDay(dayKey){
   currentMapDay = String(dayKey);
   renderMapDayTabs();
@@ -2178,11 +2150,6 @@ function switchMapDay(dayKey){
     });
   } else {
     pinsData = allPinsCache[key]||[];
-    const before = pinsData.map(function(p){return p.id;}).join(',');
-    pinsData = reorderPinsBySchedule(key, pinsData);
-    const after = pinsData.map(function(p){return p.id;}).join(',');
-    allPinsCache[key] = pinsData; // 정렬된 순서를 캐시에도 반영
-    var orderChanged = (before !== after);
   }
   if(pinsData.length && kakaoMap){
     pinsData.forEach(function(row, i){
@@ -2192,8 +2159,6 @@ function switchMapDay(dayKey){
     if(key!=='all'&&allRoutesCache[key]){
       drawRouteLines();
     }
-    // 순서가 실제로 바뀐 경우에만 Supabase pin_order 업데이트
-    if(key!=='all' && orderChanged) syncPinOrder();
   } else {
     renderMapPins();
   }
