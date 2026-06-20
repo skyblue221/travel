@@ -154,7 +154,8 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 .sched-input{flex:1;border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-size:12px;font-family:inherit;outline:none;background:var(--bg);color:var(--text)}
 .sched-input:focus{border-color:var(--accent)}
 .schedule-content-wrap{display:flex;flex-direction:column;flex:1;min-width:0;gap:2px}
-.schedule-place{font-size:10px;color:var(--accent2);font-weight:500}
+.schedule-place{font-size:10px;color:var(--accent2);font-weight:500;display:inline-flex;align-items:center;gap:3px}
+.schedule-pin-num{display:inline-flex;align-items:center;justify-content:center;background:var(--accent);color:white;border-radius:50%;width:14px;height:14px;font-size:9px;font-weight:600;flex-shrink:0}
 .place-search-wrap{position:relative;flex:2}
 .place-dropdown{position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1.5px solid var(--accent2);border-radius:8px;z-index:50;max-height:180px;overflow-y:auto;box-shadow:var(--shadow);margin-top:2px}
 .place-dropdown-item{padding:9px 12px;font-size:12px;color:var(--text);cursor:pointer;border-bottom:1px solid var(--border);line-height:1.4}
@@ -609,7 +610,8 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
       </div>
     </div>
     <div id="map-search-results" style="display:none;margin-bottom:10px;border:1.5px solid var(--accent2);border-radius:10px;overflow:hidden;background:var(--surface);max-height:220px;overflow-y:auto"></div>
-    <div class="map-pins" id="map-pins"></div>
+    <!-- 핀 목록 없음 — 일정 목록에 통합 표시 -->
+    <div id="map-pins" style="display:none"></div>
     <div style="display:flex;gap:8px;margin-top:8px;margin-bottom:14px">
       <button class="map-route-btn" style="flex:3;white-space:nowrap" onclick="drawRoute()">🛣️ 루트 그리기</button>
       <button class="map-route-btn" style="flex:1;white-space:nowrap" onclick="clearRoute()">🗑️ 루트 지우기</button>
@@ -1661,6 +1663,7 @@ function addPinForDay(place, dayIdx, label){
       addPinMarkerToMap(row, mapPins.length+1);
       renderMapPins();
     }
+    renderSchedule(); // 핀 번호 뱃지 반영
     showToast('📍 '+place.place_name+' 지도에 추가됐어요!');
   });
 }
@@ -1796,7 +1799,13 @@ function renderSchedule(){
       h+='<span class="schedule-time">'+(item.time||'──')+'</span>';
       h+='<div class="schedule-content-wrap">';
       h+='<span class="schedule-content">'+item.content+'</span>';
-      if(item.place){ h+='<span class="schedule-place" style="cursor:pointer" onclick="goToMapPlace(\''+item.place+'\',\''+item.id+'\')" title="지도에서 보기">📍 '+item.place+'</span>'; }
+      if(item.place){
+        const dayKeyForPin = String(item.dayIdx);
+        const pinsOfDay = (allPinsCache && allPinsCache[dayKeyForPin]) || [];
+        const pinIdxInDay = pinsOfDay.findIndex(function(p){ return p.name===item.place; });
+        const pinNumBadge = pinIdxInDay!==-1 ? '<span class="schedule-pin-num">'+(pinIdxInDay+1)+'</span>' : '';
+        h+='<span class="schedule-place" style="cursor:pointer" onclick="goToMapPlace(\''+item.place+'\',\''+item.id+'\')" title="지도에서 보기">'+pinNumBadge+' 📍 '+item.place+'</span>';
+      }
       h+='</div>';
       h+='<span class="schedule-category '+(catMap[item.cat]||'cat-etc')+'">'+item.cat+'</span>';
       // 순서 버튼
@@ -1925,6 +1934,7 @@ async function addMapPin(place){
   document.getElementById('map-search-results').style.display='none';
   document.getElementById('map-search-inp').value='';
   renderMapPins();
+  renderSchedule(); // 핀 번호 뱃지 반영
   showToast('📍 '+place.place_name+' 추가됐어요!');
   openPinScheduleModal(place.place_name, place.category_name||'');
 }
@@ -2015,6 +2025,7 @@ async function removePin(idx){
   });
   updatePinMarkers();
   renderMapPins();
+  renderSchedule(); // 핀 번호 뱃지 갱신
   if(CFG.supabaseUrl && pin.id){
     sbFetch('map_pins','DELETE',null,'id=eq.'+pin.id).catch(function(e){ console.error(e); });
   }
@@ -2023,16 +2034,28 @@ async function removePin(idx){
 async function movePinUp(idx){
   if(idx===0) return;
   const tmp=mapPins[idx]; mapPins[idx]=mapPins[idx-1]; mapPins[idx-1]=tmp;
+  syncPinCacheOrder();
   await syncPinOrder();
   updatePinMarkers();
   renderMapPins();
+  renderSchedule();
 }
 async function movePinDown(idx){
   if(idx===mapPins.length-1) return;
   const tmp=mapPins[idx]; mapPins[idx]=mapPins[idx+1]; mapPins[idx+1]=tmp;
+  syncPinCacheOrder();
   await syncPinOrder();
   updatePinMarkers();
   renderMapPins();
+  renderSchedule();
+}
+
+// mapPins의 현재 순서를 allPinsCache에도 반영 (일정 뱃지 번호 계산용)
+function syncPinCacheOrder(){
+  if(currentMapDay==='all') return; // 전체 보기에서는 순서 동기화 생략
+  allPinsCache[currentMapDay] = mapPins.map(function(p){
+    return {id:p.id,name:p.name,lat:p.lat,lng:p.lng,addr:p.addr,phone:p.phone,url:p.url,category:p.category,day_idx:currentMapDay};
+  });
 }
 
 // 현재 mapPins 순서를 pin_order로 Supabase에 반영
@@ -2072,6 +2095,7 @@ async function loadAllMapPins(){
     const routes = await sbFetch('map_routes','GET',null,'trip_id=eq.'+currentTripId);
     allRoutesCache = {};
     (routes||[]).forEach(function(r){ allRoutesCache[r.day_idx] = r.has_route; });
+    renderSchedule(); // 핀 번호 뱃지 반영
   }catch(e){ console.error('핀 로드 오류:',e); }
 }
 
