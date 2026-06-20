@@ -613,7 +613,6 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
       </div>
     </div>
     <div id="map-search-results" style="display:none;margin-bottom:10px;border:1.5px solid var(--accent2);border-radius:10px;overflow:hidden;background:var(--surface);max-height:220px;overflow-y:auto"></div>
-    <div class="map-pins" id="map-pins"></div>
     <div style="display:flex;gap:8px;margin-top:8px;margin-bottom:14px">
       <button class="map-route-btn" style="flex:3;white-space:nowrap" onclick="drawRoute()">🛣️ 루트 그리기</button>
       <button class="map-route-btn" style="flex:1;white-space:nowrap" onclick="clearRoute()">🗑️ 루트 지우기</button>
@@ -1688,6 +1687,7 @@ function addPinForDay(place, dayIdx, label){
     if(currentMapDay===dayKey||currentMapDay==='all'){
       addPinMarkerToMap(row, mapPins.length+1);
       renderMapPins();
+      syncPinOrderWithSchedule(dayIdx);
     }
     showToast('📍 '+place.place_name+' 지도에 추가됐어요!');
   });
@@ -1773,6 +1773,38 @@ async function moveSchedItem(id, direction){
   S.schedule[idxB] = tmp;
   saveLocal();
   renderSchedule();
+  // 일정 순서가 바뀌었으니, 연결된 지도 핀 순서도 같이 맞춰줌
+  syncPinOrderWithSchedule(dayIdx);
+}
+
+// 일정(S.schedule)의 현재 순서를 기준으로, 같은 Day의 지도 핀 순서를 재배치
+async function syncPinOrderWithSchedule(dayIdx){
+  if(!kakaoMap) return;
+  const dayKey = String(dayIdx);
+  const days = getDayGroups();
+  const day = days.find(function(d){ return String(d.dayIdx)===dayKey; });
+  if(!day) return;
+  // 일정에 적힌 장소명 순서 (중복/빈 값 제거)
+  const placeOrder = day.items.filter(function(i){ return i.content && i.place; }).map(function(i){ return i.place; });
+  if(!placeOrder.length) return;
+  // 현재 화면(전체 또는 해당 Day)에 떠 있는 핀들 중, 이 Day에 속한 핀만 추려서 재정렬
+  const sameDayPins = mapPins.filter(function(p){ return String(p.dayIdx)===dayKey; });
+  const otherPins = mapPins.filter(function(p){ return String(p.dayIdx)!==dayKey; });
+  sameDayPins.sort(function(a,b){
+    const ia = placeOrder.indexOf(a.name), ib = placeOrder.indexOf(b.name);
+    return (ia===-1?999:ia) - (ib===-1?999:ib);
+  });
+  mapPins = otherPins.concat(sameDayPins);
+  updatePinMarkers();
+  await syncPinOrder();
+  // 순서가 바뀌면서 인덱스가 달라지므로, 열려있던 상세 카드는 안전하게 닫음
+  const cardEl = document.getElementById('map-place-card');
+  if(cardEl) cardEl.style.display = 'none';
+  currentCardPinIdx = -1;
+  if(currentMapDay!=='all' && allRoutesCache[currentMapDay]){
+    clearPolylines();
+    drawRouteLines();
+  }
 }
 
 // 일정 📍 탭하면 지도 탭으로 이동 + 해당 위치 포커스
@@ -2015,24 +2047,9 @@ async function addPinToSchedule(dayIdx, cat){
   await postData({action:'addRow',sheet:'일정',row});
   showToast('🗓️ '+day.dayLabel+' 일정에 추가됐어요!');
 }
+// 핀 목록 UI는 제거됨 — 핀 순서는 이제 일정(스케줄)의 ▲▼ 버튼으로 관리됨 (syncPinOrderWithSchedule 참고)
 function renderMapPins(){
-  const el=document.getElementById('map-pins');
-  if(!mapPins.length){ el.innerHTML=''; return; }
-  let html='';
-  mapPins.forEach(function(p,i){
-    const isFirst = i===0;
-    const isLast = i===mapPins.length-1;
-    html += '<div class="map-pin-item" onclick="focusPin('+i+')" title="클릭하면 지도에서 위치 확인">'
-      + '<div class="map-pin-num">'+(i+1)+'</div>'
-      + '<span class="map-pin-name" style="flex:1;font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.name+'</span>'
-      + '<div class="map-pin-btns" onclick="event.stopPropagation()">'
-      + '<button class="map-pin-btn" onclick="movePinUp('+i+')" '+(isFirst?'disabled':'')+'>▲</button>'
-      + '<button class="map-pin-btn" onclick="movePinDown('+i+')" '+(isLast?'disabled':'')+'>▼</button>'
-      + '</div>'
-      + '<span style="font-size:14px;color:var(--text3);cursor:pointer;padding:0 4px;margin-left:2px" onclick="event.stopPropagation();removePin('+i+')">×</span>'
-      + '</div>';
-  });
-  el.innerHTML=html;
+  // no-op (하위 호환을 위해 함수는 유지)
 }
 
 async function removePin(idx){
