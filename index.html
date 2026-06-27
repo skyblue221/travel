@@ -1107,7 +1107,15 @@ function loadTripState(id){
   if(!S.expenses) S.expenses=[];
   // mapPinsData/dayRoutes는 더 이상 사용하지 않음 (Supabase map_pins 테이블로 이전됨)
 }
-function saveTripState(id){ localStorage.setItem('tp-state-'+id,JSON.stringify(S)); }
+function saveTripState(id){
+  try{
+    localStorage.setItem('tp-state-'+id,JSON.stringify(S));
+  }catch(e){
+    console.error('로컬 저장 실패:', e);
+    // 저장 용량 초과 등의 이유로 실패해도, 앱이 멈추지 않고 사용자에게 알려줌
+    showToast('⚠️ 저장 공간이 가득 찼어요. 사진을 정리하거나 일부 일기를 지워주세요.');
+  }
+}
 function resetState(){ S={wish:[],checklist:[],schedule:[],memos:[],diary:[],expenses:[],settings:{tripName:'',dateStart:'',dateEnd:'',members:'min,송송이'}}; }
 function saveLocal(){ if(currentTripId) saveTripState(currentTripId); }
 
@@ -2689,15 +2697,43 @@ function populateDiaryDaySelect(){
 }
 function previewPhoto(event){
   const file=event.target.files[0]; if(!file) return;
-  const reader=new FileReader();
-  reader.onload=e=>{
-    pendingPhotoData=e.target.result;
+  // 원본을 그대로 저장하면 용량이 너무 커져서(localStorage 한도 초과) 저장이 멈출 수 있음
+  // → 업로드 시점에 가로/세로 최대 1000px, JPEG 품질 0.75로 리사이즈/압축
+  compressImage(file, 1000, 0.75).then(function(dataUrl){
+    pendingPhotoData=dataUrl;
     const img=document.getElementById('diary-photo-img');
     img.src=pendingPhotoData; img.style.display='block';
     document.getElementById('diary-photo-placeholder').style.display='none';
     document.getElementById('diary-photo-clear').style.display='flex';
-  };
-  reader.readAsDataURL(file);
+  }).catch(function(e){
+    console.error('이미지 압축 실패:', e);
+    showToast('⚠️ 사진을 처리하지 못했어요. 다른 사진으로 시도해주세요.');
+  });
+}
+// 이미지를 캔버스에 그려 리사이즈 + JPEG로 재인코딩 (용량 절감용)
+function compressImage(file, maxSize, quality){
+  return new Promise(function(resolve, reject){
+    const reader = new FileReader();
+    reader.onload = function(e){
+      const img = new Image();
+      img.onload = function(){
+        let w = img.width, h = img.height;
+        if(w > maxSize || h > maxSize){
+          if(w > h){ h = Math.round(h * maxSize / w); w = maxSize; }
+          else { w = Math.round(w * maxSize / h); h = maxSize; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 function clearPhoto(e){
   e.stopPropagation(); pendingPhotoData=null;
