@@ -273,7 +273,7 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 }
 .scrap-caption{padding:6px 2px 0;text-align:center}
 .scrap-time-badge{font-size:9px;color:var(--accent);font-weight:500;margin-bottom:3px;letter-spacing:.04em}
-.scrap-comment-text{font-size:11px;color:var(--text2);line-height:1.5;font-family:'Noto Serif KR',serif;word-break:break-all}
+.scrap-comment-text{font-size:11px;color:var(--text2);line-height:1.5;font-family:'Noto Serif KR',serif;word-break:break-all;white-space:pre-wrap}
 .scrap-del-btn{position:absolute;top:-6px;right:-6px;background:var(--accent);color:white;border:none;border-radius:50%;width:20px;height:20px;font-size:11px;cursor:pointer;display:none;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(0,0,0,.2)}
 .scrap-card:hover .scrap-del-btn{display:flex}
 /* 테이프 장식 */
@@ -3067,13 +3067,14 @@ function exportDiary(){
   const groups={};
   getSortedDiary().forEach(e=>{ const k=e.dayLabel||'기타'; if(!groups[k]) groups[k]={label:k,date:e.date,items:[]}; groups[k].items.push(e); });
 
+  function escHtml(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function card(e,i,isWide){
     const emojiList=['🌸','🌊','🏔️','🍜','🎡','🌅'];
     const imgHtml = e.photoData
       ? '<img class="scrap-img" src="'+e.photoData+'" alt="">'
       : '<div class="scrap-no-img">'+emojiList[i%6]+'</div>';
-    const timeHtml = e.time ? '<div class="scrap-time-badge">⏰ '+e.time+'</div>' : '';
-    const commentHtml = e.comment ? '<div class="scrap-comment-text">'+e.comment+'</div>' : '';
+    const timeHtml = e.time ? '<div class="scrap-time-badge">⏰ '+escHtml(e.time)+'</div>' : '';
+    const commentHtml = e.comment ? '<div class="scrap-comment-text">'+escHtml(e.comment)+'</div>' : '';
     return '<div class="scrap-card'+(isWide?' wide':'')+'"><div class="scrap-tape"></div><div class="scrap-polaroid">'+imgHtml+'<div class="scrap-caption">'+timeHtml+commentHtml+'</div></div></div>';
   }
 
@@ -3111,7 +3112,7 @@ function exportDiary(){
     '.scrap-no-img{width:100%;aspect-ratio:1;background:linear-gradient(135deg,#f5f0e8,#e8c4a0);display:flex;align-items:center;justify-content:center;font-size:36px}',
     '.scrap-caption{padding:7px 2px 0;text-align:center}',
     '.scrap-time-badge{font-size:9px;color:#c17f5a;font-weight:500;margin-bottom:3px}',
-    '.scrap-comment-text{font-size:11px;color:#7a6a60;line-height:1.5}',
+    '.scrap-comment-text{font-size:11px;color:#7a6a60;line-height:1.5;white-space:pre-wrap}',
     '.footer{text-align:center;padding:48px 20px 20px;font-size:12px;color:#b0a090;line-height:2.2}',
   ].join('');
 
@@ -3234,7 +3235,7 @@ function buildFullTripContent(){
     '.ft-diary-card{background:#fff;border:1px solid #ecddd0;border-radius:10px;overflow:hidden;box-shadow:1px 2px 8px rgba(100,70,40,.08)}',
     '.ft-diary-img{width:100%;aspect-ratio:1;object-fit:cover;display:block}',
     '.ft-diary-noimg{width:100%;aspect-ratio:1;background:#f0e6da;display:flex;align-items:center;justify-content:center;font-size:28px}',
-    '.ft-diary-cap{padding:8px 9px;font-size:11.5px;color:#5a4a40;line-height:1.5}',
+    '.ft-diary-cap{padding:8px 9px;font-size:11.5px;color:#5a4a40;line-height:1.5;white-space:pre-wrap}',
     '.footer{text-align:center;padding:36px 20px;font-size:12px;color:#b0a090;line-height:2}',
   ].join('');
 
