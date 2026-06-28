@@ -746,6 +746,10 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
     <div class="modal-label">API 키 (변경할 때만 입력)</div>
     <input class="modal-input" id="s-kakao" placeholder="현재 키가 있어요 (변경 시에만 입력)">
 
+    <div class="modal-section-title">📦 내보내기</div>
+    <div class="modal-label" style="margin-bottom:8px">위시·체크·일정(장소 포함)·메모·예산·일기를 한 파일로 받아요</div>
+    <button style="width:100%;background:var(--accent2);border:none;border-radius:10px;padding:11px;font-size:13px;color:white;cursor:pointer;font-family:inherit;font-weight:500" onclick="exportFullTrip()">📦 이 여행 전체 다운로드 (HTML)</button>
+
     <div class="modal-btns">
       <button class="modal-cancel" onclick="closeSettings()">취소</button>
       <button class="modal-save" onclick="saveSettings()">저장</button>
@@ -3081,6 +3085,140 @@ function exportDiary(){
   a.click();
   showToast('📖 일기 파일이 저장됐어요!');
 }
+// ===================== 여행 전체 내보내기 (위시/체크/일정+장소/메모/예산/일기) =====================
+function exportFullTrip(){
+  const tripName=S.settings.tripName||'우리 여행';
+  const dateStart=S.settings.dateStart||'';
+  const dateEnd=S.settings.dateEnd||'';
+  const members=(S.settings.members||'').split(',').map(m=>m.trim()).filter(Boolean);
+  const totalExp=S.expenses?S.expenses.reduce((s,e)=>s+e.amount,0):0;
+
+  function esc(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // 1) 위시리스트
+  const wishPlaces = S.wish.filter(w=>w.type==='place');
+  const wishDos = S.wish.filter(w=>w.type==='do');
+  function wishList(arr){
+    if(!arr.length) return '<div class="ft-empty">(아직 없어요)</div>';
+    return '<ul class="ft-list">'+arr.map(w=>'<li class="'+(w.done?'done':'')+'">'+(w.done?'✅ ':'⬜ ')+esc(w.text)+'</li>').join('')+'</ul>';
+  }
+
+  // 2) 체크리스트
+  function checklistHtml(){
+    if(!S.checklist.length) return '<div class="ft-empty">(아직 없어요)</div>';
+    return '<ul class="ft-list">'+S.checklist.map(c=>'<li class="'+(c.checked?'done':'')+'">'+(c.checked?'✅ ':'⬜ ')+'<span class="ft-tag">'+esc(c.cat)+'</span> '+esc(c.text)+'</li>').join('')+'</ul>';
+  }
+
+  // 3) 일정 (장소 포함)
+  function scheduleHtml(){
+    const days = getDayGroups();
+    if(!days.length) return '<div class="ft-empty">(아직 없어요)</div>';
+    return days.map(function(d){
+      const items = d.items.filter(i=>i.content);
+      const rows = items.length
+        ? items.map(function(i){
+            const placeHtml = i.place ? ' <span class="ft-place">📍 '+esc(i.place)+'</span>' : '';
+            return '<li><span class="ft-time">'+(i.time?esc(i.time):'──')+'</span> '+esc(i.content)+placeHtml+' <span class="ft-tag">'+esc(i.cat)+'</span></li>';
+          }).join('')
+        : '<li class="ft-empty-inline">일정 없음</li>';
+      return '<div class="ft-day"><div class="ft-day-title">'+esc(d.dayLabel)+(d.date?' <span class="ft-day-date">· '+esc(d.date)+'</span>':'')+'</div><ul class="ft-list">'+rows+'</ul></div>';
+    }).join('');
+  }
+
+  // 4) 메모
+  function memoHtml(){
+    if(!S.memos.length) return '<div class="ft-empty">(아직 없어요)</div>';
+    return S.memos.map(m=>'<div class="ft-memo"><div class="ft-memo-title">'+esc(m.title)+'</div><div class="ft-memo-body">'+esc(m.body).replace(/\n/g,'<br>')+'</div></div>').join('');
+  }
+
+  // 5) 예산
+  function expenseHtml(){
+    if(!S.expenses||!S.expenses.length) return '<div class="ft-empty">(아직 없어요)</div>';
+    const rows = S.expenses.map(e=>'<tr><td>'+esc(e.payer)+'</td><td><span class="ft-tag">'+esc(e.cat)+'</span></td><td>'+esc(e.desc)+'</td><td class="ft-amount">'+Number(e.amount).toLocaleString('ko-KR')+'원</td></tr>').join('');
+    return '<div class="ft-total">총 지출: '+Number(totalExp).toLocaleString('ko-KR')+'원</div><table class="ft-table"><thead><tr><th>결제자</th><th>분류</th><th>내용</th><th>금액</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  }
+
+  // 6) 일기 (사진 + 한마디, Day별)
+  function diaryHtml(){
+    if(!S.diary||!S.diary.length) return '<div class="ft-empty">(아직 없어요)</div>';
+    const groups={};
+    getSortedDiary().forEach(e=>{ const k=e.dayLabel||'기타'; if(!groups[k]) groups[k]={label:k,date:e.date,items:[]}; groups[k].items.push(e); });
+    return Object.values(groups).map(function(g){
+      const cards = g.items.map(function(e){
+        const img = e.photoData ? '<img class="ft-diary-img" src="'+e.photoData+'" alt="">' : '<div class="ft-diary-noimg">📷</div>';
+        const time = e.time ? '<span class="ft-time">'+esc(e.time)+'</span> ' : '';
+        return '<div class="ft-diary-card">'+img+'<div class="ft-diary-cap">'+time+esc(e.comment)+'</div></div>';
+      }).join('');
+      return '<div class="ft-day"><div class="ft-day-title">'+esc(g.label)+(g.date?' <span class="ft-day-date">· '+esc(g.date)+'</span>':'')+'</div><div class="ft-diary-grid">'+cards+'</div></div>';
+    }).join('');
+  }
+
+  const coverDate = dateStart ? '📅 '+esc(dateStart)+(dateEnd?' → '+esc(dateEnd):'') : '';
+  const coverMembers = members.length ? '👥 '+members.map(esc).join(' · ') : '';
+  const today = new Date().toLocaleDateString('ko-KR');
+
+  const css = [
+    '*{box-sizing:border-box;margin:0;padding:0}',
+    'body{background:#faf7f2;font-family:-apple-system,BlinkMacSystemFont,sans-serif;color:#3a2e28;max-width:680px;margin:0 auto;padding-bottom:60px;line-height:1.6}',
+    '.cover{background:linear-gradient(160deg,#c17f5a,#8fb5a0);padding:56px 24px 40px;color:white;text-align:center}',
+    '.cover-emoji{font-size:48px;margin-bottom:12px}',
+    '.cover-title{font-size:26px;font-weight:700;margin-bottom:8px}',
+    '.cover-sub{font-size:13px;opacity:.9;margin-bottom:3px}',
+    '.ft-section{padding:28px 22px}',
+    '.ft-section + .ft-section{border-top:1px solid #ecddd0}',
+    '.ft-section-title{font-size:19px;font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}',
+    '.ft-day{margin-bottom:18px}',
+    '.ft-day-title{font-size:15px;font-weight:600;margin-bottom:8px;color:#a8623f}',
+    '.ft-day-date{font-size:12px;font-weight:400;color:#b0a090}',
+    '.ft-list{list-style:none}',
+    '.ft-list li{padding:6px 0;font-size:13.5px;border-bottom:1px dashed #ecddd0}',
+    '.ft-list li.done{color:#a89888;text-decoration:line-through}',
+    '.ft-list li:last-child{border-bottom:none}',
+    '.ft-empty,.ft-empty-inline{color:#b0a090;font-size:13px;padding:4px 0}',
+    '.ft-time{font-family:monospace;color:#8fb5a0;font-weight:600;font-size:12px}',
+    '.ft-place{color:#c17f5a;font-size:12px}',
+    '.ft-tag{display:inline-block;background:#f0e6da;color:#9a7a5a;border-radius:10px;padding:1px 8px;font-size:11px;margin-right:2px}',
+    '.ft-memo{margin-bottom:14px;background:#fff;border:1px solid #ecddd0;border-radius:10px;padding:12px 14px}',
+    '.ft-memo-title{font-weight:600;font-size:14px;margin-bottom:6px}',
+    '.ft-memo-body{font-size:13px;color:#5a4a40;white-space:pre-wrap}',
+    '.ft-total{font-weight:700;font-size:14px;margin-bottom:10px;color:#a8623f}',
+    '.ft-table{width:100%;border-collapse:collapse;font-size:12.5px}',
+    '.ft-table th{text-align:left;color:#9a8a7a;font-weight:600;padding:6px 4px;border-bottom:1.5px solid #ecddd0}',
+    '.ft-table td{padding:7px 4px;border-bottom:1px dashed #ecddd0}',
+    '.ft-amount{text-align:right;font-weight:600}',
+    '.ft-diary-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}',
+    '.ft-diary-card{background:#fff;border:1px solid #ecddd0;border-radius:10px;overflow:hidden;box-shadow:1px 2px 8px rgba(100,70,40,.08)}',
+    '.ft-diary-img{width:100%;aspect-ratio:1;object-fit:cover;display:block}',
+    '.ft-diary-noimg{width:100%;aspect-ratio:1;background:#f0e6da;display:flex;align-items:center;justify-content:center;font-size:28px}',
+    '.ft-diary-cap{padding:8px 9px;font-size:11.5px;color:#5a4a40;line-height:1.5}',
+    '.footer{text-align:center;padding:36px 20px;font-size:12px;color:#b0a090;line-height:2}',
+  ].join('');
+
+  const html = '<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(tripName)+'</title><style>'+css+'</style></head><body>'
+    + '<div class="cover"><div class="cover-emoji">✈️</div><div class="cover-title">'+esc(tripName)+'</div>'
+      + (coverDate?'<div class="cover-sub">'+coverDate+'</div>':'')
+      + (coverMembers?'<div class="cover-sub">'+coverMembers+'</div>':'')
+    + '</div>'
+    + '<div class="ft-section"><div class="ft-section-title">🌟 위시리스트</div>'
+      + '<div style="font-size:13px;font-weight:600;margin:10px 0 6px;color:#8a7a6a">📍 가고 싶은 곳</div>'+wishList(wishPlaces)
+      + '<div style="font-size:13px;font-weight:600;margin:14px 0 6px;color:#8a7a6a">🎉 하고 싶은 것</div>'+wishList(wishDos)
+    + '</div>'
+    + '<div class="ft-section"><div class="ft-section-title">✅ 체크리스트</div>'+checklistHtml()+'</div>'
+    + '<div class="ft-section"><div class="ft-section-title">🗓️ 일정</div>'+scheduleHtml()+'</div>'
+    + '<div class="ft-section"><div class="ft-section-title">📝 메모</div>'+memoHtml()+'</div>'
+    + '<div class="ft-section"><div class="ft-section-title">💰 예산</div>'+expenseHtml()+'</div>'
+    + '<div class="ft-section"><div class="ft-section-title">📸 여행 일기</div>'+diaryHtml()+'</div>'
+    + '<div class="footer">🎞️ '+esc(tripName)+'<br>'+today+' 다운로드</div>'
+    + '</body></html>';
+
+  const blob=new Blob([html],{type:'text/html;charset=utf-8'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=tripName+'-전체기록.html';
+  a.click();
+  showToast('📦 여행 전체 기록이 저장됐어요!');
+}
+
 // ===================== RENDER ALL =====================
 function renderAll(){
   applySettings(); renderWish(); renderChecklist(); renderSchedule(); renderMemos(); renderDiary();
@@ -3232,7 +3370,8 @@ function buildPageContent(){
       const items = d.items.filter(function(i){return i.content;});
       if(items.length){
         items.forEach(function(i){
-          blocks.push({ object:'block', type:'bulleted_list_item', bulleted_list_item:{ rich_text:[{type:'text',text:{content:(i.time?i.time+' ':'')+i.content+' ['+i.cat+']'}}] }});
+          const placeText = i.place ? ' 📍'+i.place : '';
+          blocks.push({ object:'block', type:'bulleted_list_item', bulleted_list_item:{ rich_text:[{type:'text',text:{content:(i.time?i.time+' ':'')+i.content+placeText+' ['+i.cat+']'}}] }});
         });
       } else {
         blocks.push({ object:'block', type:'paragraph', paragraph:{ rich_text:[{type:'text',text:{content:'(일정 없음)'}}] }});
