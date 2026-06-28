@@ -1070,7 +1070,7 @@ function deleteTrip(id){
   trips=trips.filter(t=>t.id!==id); saveTrips();
   localStorage.removeItem('tp-state-'+id);
   if(CFG.supabaseUrl){
-    sbFetch('trips','DELETE',null,'id=eq.'+id).catch(function(e){ console.error(e); });
+    sbFetch('trips','DELETE',null,'id=eq.'+id).catch(sbCatch('여행 삭제'));
   }
   renderTripList();
 }
@@ -1159,6 +1159,14 @@ async function sbFetch(table, method, body, query){
   const text = await res.text();
   return text ? JSON.parse(text) : null;
 }
+// 백그라운드 Supabase 요청이 실패했을 때, 콘솔에만 찍히고 조용히 묻히지 않도록
+// 사용자에게도 알려주는 공통 헬퍼. 기존 .catch(e=>console.error(e)) 자리를 대체.
+function sbCatch(label){
+  return function(e){
+    console.error(label+' 동기화 실패:', e);
+    showToast('⚠️ '+label+' 서버 저장에 실패했어요. 인터넷 연결을 확인해주세요.');
+  };
+}
 
 async function fetchData(){
   if(!CFG.supabaseUrl){ saveLocal(); return; }
@@ -1172,17 +1180,26 @@ async function fetchData(){
       sbFetch('memos',     'GET', null, 'trip_id=eq.'+tripId+'&order=created_at.desc'),
       sbFetch('expenses',  'GET', null, 'trip_id=eq.'+tripId+'&order=created_at.asc'),
     ]);
+    // diary는 별도로 처리 — 테이블이 아직 없는 경우(마이그레이션 전)에도
+    // 나머지 데이터(위시/체크/일정/메모/예산) 로딩이 같이 실패하지 않도록 분리
+    let diary = null;
+    try{
+      diary = await sbFetch('diary', 'GET', null, 'trip_id=eq.'+tripId+'&order=created_at.desc');
+    }catch(diaryErr){
+      console.error('diary 테이블 조회 실패 (테이블이 아직 없을 수 있어요):', diaryErr);
+    }
     // Supabase 컬럼명 → 앱 필드명 매핑
-    // 일기는 로컬에만 저장 — Supabase 덮어쓰기 방지
-    const savedDiary = S.diary||[];
-
     S.wish      = (wish||[]).map(function(r){ return {id:r.id,type:r.type,text:r.text,done:r.done}; });
     S.checklist = (checklist||[]).map(function(r){ return {id:r.id,cat:r.cat,text:r.text,checked:r.checked}; });
     S.schedule  = (schedule||[]).map(function(r){ return {id:r.id,dayIdx:r.day_idx,dayLabel:r.day_label,date:r.date,time:r.time,content:r.content,place:r.place||'',cat:r.cat}; });
     S.memos     = (memos||[]).map(function(r){ return {id:r.id,title:r.title,body:r.body,createdAt:r.created_at,author:r.author||''}; });
     S.expenses  = (expenses||[]).map(function(r){ return {id:r.id,payer:r.payer,cat:r.cat,desc:r.description,amount:r.amount}; });
-
-    S.diary = savedDiary;
+    // diary 테이블 조회에 성공했을 때만 덮어씀 (실패 시 기존 로컬 데이터 보존 — 과도기 안전장치)
+    if(diary!==null){
+      S.diary = diary.map(function(r){ return {id:r.id,dayIdx:r.day_idx==null?-1:Number(r.day_idx),dayLabel:r.day_label,date:r.date,time:r.time,comment:r.comment,photoData:r.photo_data||null,author:r.author||''}; });
+    } else if(!S.diary){
+      S.diary = [];
+    }
 
     // trips에 저장된 날짜를 S.settings에 반영
     const trip = trips.find(function(t){ return t.id===tripId; });
@@ -1245,7 +1262,7 @@ async function postData(payload){
       await sbFetch(table, 'DELETE', null, 'id=eq.'+payload.id);
     }
     setSyncStatus('ok');
-  } catch(e){ console.error('Supabase error:', e); setSyncStatus('err'); }
+  } catch(e){ console.error('Supabase error:', e); setSyncStatus('err'); showToast('⚠️ 서버 저장에 실패했어요. 잠시 후 다시 시도해주세요.'); }
 }
 
 // ===================== SETTINGS =====================
@@ -1793,7 +1810,7 @@ async function saveSchedEdit(){
       content: item.content,
       place: item.place,
       cat: item.cat
-    },'id=eq.'+item.id).catch(function(e){ console.error(e); });
+    },'id=eq.'+item.id).catch(sbCatch('일정 수정'));
   }
   showToast('일정이 수정됐어요 ✅');
 }
@@ -2114,7 +2131,7 @@ async function removePin(idx){
   updatePinMarkers();
   renderMapPins();
   if(CFG.supabaseUrl && pin.id){
-    sbFetch('map_pins','DELETE',null,'id=eq.'+pin.id).catch(function(e){ console.error(e); });
+    sbFetch('map_pins','DELETE',null,'id=eq.'+pin.id).catch(sbCatch('핀 삭제'));
   }
 }
 
@@ -2438,7 +2455,7 @@ async function saveCommentEdit(comment, newBody){
   });
   // Supabase 업데이트
   if(CFG.supabaseUrl){
-    sbFetch('comments','PATCH',{body:newBody},'id=eq.'+comment.id).catch(function(e){ console.error(e); });
+    sbFetch('comments','PATCH',{body:newBody},'id=eq.'+comment.id).catch(sbCatch('댓글 수정'));
   }
   showToast('댓글이 수정됐어요 ✅');
 }
@@ -2454,7 +2471,7 @@ async function deleteComment(comment, itemEl){
   // 뱃지 업데이트
   updateCommentBadge(comment.target_type, comment.target_id);
   if(CFG.supabaseUrl){
-    sbFetch('comments','DELETE',null,'id=eq.'+comment.id).catch(function(e){ console.error(e); });
+    sbFetch('comments','DELETE',null,'id=eq.'+comment.id).catch(sbCatch('댓글 삭제'));
   }
 }
 
@@ -2483,7 +2500,7 @@ async function addComment(type){
   renderComments(commentsCache[targetId], document.getElementById(listId));
   updateCommentBadge(type, targetId);
   if(CFG.supabaseUrl){
-    sbFetch('comments','POST',comment).catch(function(e){ console.error(e); });
+    sbFetch('comments','POST',comment).catch(sbCatch('댓글 추가'));
   }
 }
 
@@ -2501,7 +2518,7 @@ async function saveMemoEdit(){
   renderMemos();
   // Supabase 업데이트
   if(CFG.supabaseUrl){
-    sbFetch('memos','PATCH',{title:newTitle,body:newBody},'id=eq.'+id).catch(function(e){ console.error(e); });
+    sbFetch('memos','PATCH',{title:newTitle,body:newBody},'id=eq.'+id).catch(sbCatch('메모 수정'));
   }
   showToast('메모가 수정됐어요 ✅');
 }
@@ -2649,7 +2666,7 @@ async function saveExpenseEdit(){
       cat: item.cat,
       description: item.desc,
       amount: item.amount
-    },'id=eq.'+item.id).catch(function(e){ console.error(e); });
+    },'id=eq.'+item.id).catch(sbCatch('지출 수정'));
   }
   showToast('지출이 수정됐어요 ✅');
 }
@@ -2797,7 +2814,8 @@ function addDiaryEntry(){
   if(!comment&&!pendingPhotoData){ showToast('사진이나 글을 추가해주세요'); return; }
   const dayIdx=daySelVal==='-1'?-1:Number(daySelVal);
   const days=getDayGroups(), day=days.find(d=>d.dayIdx===dayIdx);
-  S.diary.unshift({id:genId(),dayIdx,dayLabel:day?day.dayLabel:'기타',date:day?day.date:'',time,comment,photoData:pendingPhotoData||null,author:CFG.myName||''});
+  const entry={id:genId(),dayIdx,dayLabel:day?day.dayLabel:'기타',date:day?day.date:'',time,comment,photoData:pendingPhotoData||null,author:CFG.myName||''};
+  S.diary.unshift(entry);
   saveLocal();
   // 입력 초기화
   document.getElementById('diary-comment-inp').value='';
@@ -2809,6 +2827,20 @@ function addDiaryEntry(){
   pendingPhotoData=null;
   renderDiary();
   showToast('📸 순간이 추가됐어요!');
+  // Supabase에도 저장 — 이전에는 로컬(이 기기)에만 남아서, 캐시를 지우면 통째로 사라지는 문제가 있었음
+  if(CFG.supabaseUrl && currentTripId){
+    sbFetch('diary','POST',{
+      id: entry.id,
+      trip_id: currentTripId,
+      day_idx: String(entry.dayIdx),
+      day_label: entry.dayLabel,
+      date: entry.date,
+      time: entry.time,
+      comment: entry.comment,
+      photo_data: entry.photoData,
+      author: entry.author
+    }).catch(sbCatch('일기 추가'));
+  }
 }
 async function deleteDiaryEntry(id){
   const item=S.diary.find(e=>e.id===id); if(!item) return;
@@ -2816,6 +2848,9 @@ async function deleteDiaryEntry(id){
   const ok=await showConfirm('삭제하시겠어요?', label+'을(를) 삭제해요.');
   if(!ok) return;
   S.diary=S.diary.filter(e=>e.id!==id); saveLocal(); renderDiary();
+  if(CFG.supabaseUrl && currentTripId){
+    sbFetch('diary','DELETE',null,'id=eq.'+id).catch(sbCatch('일기 삭제'));
+  }
 }
 // 댓글 뱃지 업데이트
 function updateCommentBadge(type, targetId){
