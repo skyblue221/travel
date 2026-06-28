@@ -1794,7 +1794,8 @@ function closeSchedEdit(){
 
 async function saveSchedEdit(){
   if(!editingSchedId) return;
-  const item = S.schedule.find(function(s){ return s.id===editingSchedId; });
+  const id = editingSchedId; // closeSchedEdit()가 editingSchedId를 null로 바꾸기 전에 따로 보관
+  const item = S.schedule.find(function(s){ return s.id===id; });
   if(!item) return;
   item.time    = document.getElementById('se-time').value.trim();
   item.content = document.getElementById('se-content').value.trim();
@@ -1804,13 +1805,13 @@ async function saveSchedEdit(){
   saveLocal();
   renderSchedule();
   // Supabase 업데이트
-  if(CFG.supabaseUrl && editingSchedId){
+  if(CFG.supabaseUrl){
     sbFetch('schedule','PATCH',{
       time: item.time,
       content: item.content,
       place: item.place,
       cat: item.cat
-    },'id=eq.'+item.id).catch(sbCatch('일정 수정'));
+    },'id=eq.'+id).catch(sbCatch('일정 수정'));
   }
   showToast('일정이 수정됐어요 ✅');
 }
