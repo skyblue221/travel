@@ -390,13 +390,19 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
   #settings-modal, #memo-modal, #add-trip-modal,
   .loading-bar { display: none !important; }
 
-  /* 일기 섹션만 표시 */
+  /* 일기 섹션만 표시 (printFullTrip 실행 중엔 JS에서 별도로 숨김 처리) */
   .section { display: none !important; }
   #sec-diary { display: block !important; padding: 0 !important; }
 
   /* 편집 UI 숨기기 */
   .diary-toggle-row, .diary-add-card,
   .diary-timeline-view, .scrap-del-btn { display: none !important; }
+
+  /* 여행 전체 인쇄용 임시 영역은 항상 보이게 */
+  #ft-print-wrap-temp { display: block !important; }
+  #ft-print-wrap-temp .ft-section { break-inside: avoid; }
+  #ft-print-wrap-temp .ft-day { break-inside: avoid; }
+  #ft-print-wrap-temp .ft-diary-grid { break-inside: avoid; }
 
   /* 인쇄 레이아웃 */
   body { background: white !important; max-width: 100% !important; padding: 0 !important; }
@@ -748,7 +754,8 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
 
     <div class="modal-section-title">📦 내보내기</div>
     <div class="modal-label" style="margin-bottom:8px">위시·체크·일정(장소 포함)·메모·예산·일기를 한 파일로 받아요</div>
-    <button style="width:100%;background:var(--accent2);border:none;border-radius:10px;padding:11px;font-size:13px;color:white;cursor:pointer;font-family:inherit;font-weight:500" onclick="exportFullTrip()">📦 이 여행 전체 다운로드 (HTML)</button>
+    <button style="width:100%;background:var(--accent2);border:none;border-radius:10px;padding:11px;font-size:13px;color:white;cursor:pointer;font-family:inherit;font-weight:500;margin-bottom:8px" onclick="printFullTrip()">🖨️ PDF로 저장 (모바일 추천)</button>
+    <button style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:11px;font-size:13px;color:var(--text);cursor:pointer;font-family:inherit;font-weight:500" onclick="exportFullTrip()">📦 HTML 파일로 다운로드 (PC용)</button>
 
     <div class="modal-btns">
       <button class="modal-cancel" onclick="closeSettings()">취소</button>
@@ -3086,7 +3093,8 @@ function exportDiary(){
   showToast('📖 일기 파일이 저장됐어요!');
 }
 // ===================== 여행 전체 내보내기 (위시/체크/일정+장소/메모/예산/일기) =====================
-function exportFullTrip(){
+// 내용(css + bodyHtml)을 만드는 부분 — 다운로드(HTML 파일)와 인쇄(PDF로 저장) 둘 다에서 재사용
+function buildFullTripContent(){
   const tripName=S.settings.tripName||'우리 여행';
   const dateStart=S.settings.dateStart||'';
   const dateEnd=S.settings.dateEnd||'';
@@ -3194,8 +3202,7 @@ function exportFullTrip(){
     '.footer{text-align:center;padding:36px 20px;font-size:12px;color:#b0a090;line-height:2}',
   ].join('');
 
-  const html = '<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(tripName)+'</title><style>'+css+'</style></head><body>'
-    + '<div class="cover"><div class="cover-emoji">✈️</div><div class="cover-title">'+esc(tripName)+'</div>'
+  const bodyHtml = '<div class="cover"><div class="cover-emoji">✈️</div><div class="cover-title">'+esc(tripName)+'</div>'
       + (coverDate?'<div class="cover-sub">'+coverDate+'</div>':'')
       + (coverMembers?'<div class="cover-sub">'+coverMembers+'</div>':'')
     + '</div>'
@@ -3208,8 +3215,15 @@ function exportFullTrip(){
     + '<div class="ft-section"><div class="ft-section-title">📝 메모</div>'+memoHtml()+'</div>'
     + '<div class="ft-section"><div class="ft-section-title">💰 예산</div>'+expenseHtml()+'</div>'
     + '<div class="ft-section"><div class="ft-section-title">📸 여행 일기</div>'+diaryHtml()+'</div>'
-    + '<div class="footer">🎞️ '+esc(tripName)+'<br>'+today+' 다운로드</div>'
-    + '</body></html>';
+    + '<div class="footer">🎞️ '+esc(tripName)+'<br>'+today+'</div>';
+
+  return { tripName, css, bodyHtml };
+}
+
+// 다운로드(HTML 파일로 저장) — PC 등 HTML이 바로 열리는 환경에서 사용
+function exportFullTrip(){
+  const { tripName, css, bodyHtml } = buildFullTripContent();
+  const html = '<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+tripName+'</title><style>'+css+'</style></head><body>'+bodyHtml+'</body></html>';
 
   const blob=new Blob([html],{type:'text/html;charset=utf-8'});
   const a=document.createElement('a');
@@ -3217,6 +3231,33 @@ function exportFullTrip(){
   a.download=tripName+'-전체기록.html';
   a.click();
   showToast('📦 여행 전체 기록이 저장됐어요!');
+}
+
+// 인쇄(모바일 "공유 → PDF로 저장") — 화면에 임시로 끼워넣고 그 부분만 인쇄
+function printFullTrip(){
+  const { css, bodyHtml } = buildFullTripContent();
+  // 임시 스타일 + 콘텐츠를 body 끝에 추가
+  const styleTag = document.createElement('style');
+  styleTag.id = 'ft-print-style-temp';
+  styleTag.textContent = css;
+  const wrap = document.createElement('div');
+  wrap.id = 'ft-print-wrap-temp';
+  wrap.innerHTML = bodyHtml;
+  document.head.appendChild(styleTag);
+  document.body.appendChild(wrap);
+
+  // 일기 탭은 기본 @media print 규칙으로 항상 보이게 되어있어서, 중복 인쇄 방지를 위해 잠시 숨김
+  const diarySec = document.getElementById('sec-diary');
+  if(diarySec) diarySec.dataset.ftHidden='1';
+  if(diarySec) diarySec.style.setProperty('display','none','important');
+
+  window.print();
+
+  setTimeout(function(){
+    const s=document.getElementById('ft-print-style-temp'); if(s) s.remove();
+    const w=document.getElementById('ft-print-wrap-temp'); if(w) w.remove();
+    if(diarySec && diarySec.dataset.ftHidden){ diarySec.style.removeProperty('display'); delete diarySec.dataset.ftHidden; }
+  }, 1000);
 }
 
 // ===================== RENDER ALL =====================
