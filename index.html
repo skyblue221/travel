@@ -740,6 +740,7 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
     </div>
     <div class="modal-label" style="margin-top:8px">노션 API 키 (변경할 때만 입력)</div>
     <input class="modal-input" id="s-apikey" placeholder="ntn_... (변경 시에만 입력)" type="password">
+    <button id="s-notion-create-btn" style="margin-top:8px;display:none;width:100%;background:var(--accent2);border:none;border-radius:10px;padding:11px;font-size:13px;color:white;cursor:pointer;font-family:inherit;font-weight:500" onclick="createNotionTripPageFromSettings()">📓 이 여행 노션 페이지 만들기</button>
 
     <div class="modal-section-title">🗺️ 카카오맵</div>
     <div class="modal-label">API 키 (변경할 때만 입력)</div>
@@ -1265,7 +1266,7 @@ function openSettings(){
   document.getElementById('s-members').value=S.settings.members||'min,송송이';
   // 노션 연결 상태 확인
   if(CFG.notionApiKey){ verifyNotionKey(); }
-  else { setNotionStatusUI('err','API 키 없음'); }
+  else { setNotionStatusUI('err','API 키 없음'); updateNotionCreateBtnVisibility(false); }
   document.getElementById('settings-modal').classList.add('open');
 }
 function closeSettings(){ document.getElementById('settings-modal').classList.remove('open'); }
@@ -1458,6 +1459,35 @@ async function addDay(){
   S.schedule.push({...row,dayIdx}); renderSchedule(); renderDiary();
   renderMapDayTabs(); // 새 Day 탭도 지도쪽에 즉시 반영
   await postData({action:'addRow',sheet:'일정',row});
+}
+// 날짜(Day) 전체 삭제 — 해당 Day의 일정 항목 전체 + 연결된 지도 핀을 정리
+async function removeDay(dayIdx){
+  const days=getDayGroups();
+  const day=days.find(function(d){ return d.dayIdx===dayIdx; });
+  if(!day) return;
+  const itemCount = day.items.filter(function(i){ return i.content; }).length;
+  const msg = itemCount>0
+    ? day.dayLabel+'에 있는 일정 '+itemCount+'개가 모두 삭제돼요. (일기/지도 핀은 그대로 남아있어요)'
+    : day.dayLabel+'을(를) 삭제해요.';
+  const ok=await showConfirm('이 날짜를 삭제하시겠어요?', msg);
+  if(!ok) return;
+  const dayKey=String(dayIdx);
+  // 1) 일정에서 이 Day에 속한 항목 전부 제거 (서버에도 각각 삭제 요청)
+  const toRemove = S.schedule.filter(function(s){ return String(s.dayIdx)===dayKey; });
+  S.schedule = S.schedule.filter(function(s){ return String(s.dayIdx)!==dayKey; });
+  renderSchedule();
+  for (const item of toRemove){
+    await postData({action:'deleteRow',sheet:'일정',id:item.id});
+  }
+  // 2) 이 Day에 연결된 지도 핀도 같이 정리 (화면 + Supabase)
+  const pinsToRemove = mapPins.filter(function(p){ return String(p.dayIdx)===dayKey; });
+  for (const pin of pinsToRemove){
+    const idx = mapPins.findIndex(function(p){ return p.id===pin.id; });
+    if (idx>=0) await removePin(idx);
+  }
+  if (typeof allPinsCache!=='undefined' && allPinsCache[dayKey]) delete allPinsCache[dayKey];
+  renderMapDayTabs();
+  showToast('🗑️ '+day.dayLabel+'을(를) 삭제했어요');
 }
 async function addSchedItem(dayIdx){
   const dayIdxN=Number(dayIdx);
@@ -1853,7 +1883,7 @@ function renderSchedule(){
   let allHtml='';
   days.forEach(function(day){
     let h='<div class="schedule-day">';
-    h+='<div class="schedule-day-header"><span class="schedule-day-title">'+day.dayLabel+'</span><span class="schedule-day-date">'+day.date+'</span></div>';
+    h+='<div class="schedule-day-header"><span class="schedule-day-title">'+day.dayLabel+'</span><span style="display:flex;align-items:center;gap:8px"><span class="schedule-day-date">'+day.date+'</span><span style="font-size:13px;color:rgba(255,255,255,.85);cursor:pointer;padding:2px 6px" onclick="removeDay('+day.dayIdx+')" title="이 날짜 전체 삭제">🗑️</span></span></div>';
     h+='<div class="schedule-items">';
     const visItems=day.items.filter(function(i){return i.content;});
     if(!visItems.length){ h+='<div style="padding:8px;font-size:11px;color:var(--text3);text-align:center">일정을 추가해요</div>'; }
@@ -3284,14 +3314,41 @@ async function syncToNotion(){
 }
 
 async function verifyNotionKey(){
-  if(!CFG.notionApiKey) return;
+  if(!CFG.notionApiKey){ updateNotionCreateBtnVisibility(false); return; }
   setNotionStatusUI('loading', '노션 연결 확인 중...');
   const data = await notionFetch('/users/me', 'GET');
   if(data && data.name){
     setNotionStatusUI('ok', '연결됨: '+data.name);
+    updateNotionCreateBtnVisibility(true);
   } else {
     setNotionStatusUI('err', '연결 실패 — API 키를 확인해주세요');
+    updateNotionCreateBtnVisibility(false);
   }
+}
+// 키가 유효할 때만 버튼을 보여줌. 이미 페이지가 있으면 비활성화 상태로 안내만 표시
+function updateNotionCreateBtnVisibility(keyValid){
+  const btn = document.getElementById('s-notion-create-btn');
+  if(!btn) return;
+  if(!keyValid){ btn.style.display='none'; return; }
+  const trip = trips.find(function(t){ return t.id===currentTripId; });
+  const hasPage = !!(trip && trip.notionPageId);
+  btn.style.display = 'block';
+  if(hasPage){
+    btn.textContent = '📓 이미 노션 페이지가 있어요 (상단 동기화 버튼 이용)';
+    btn.disabled = true;
+    btn.style.opacity = '0.6';
+    btn.style.cursor = 'default';
+  } else {
+    btn.textContent = '📓 이 여행 노션 페이지 만들기';
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+  }
+}
+// 설정 화면에서 "노션 페이지 만들기" 버튼 클릭 시
+async function createNotionTripPageFromSettings(){
+  await createNotionTripPage();
+  updateNotionCreateBtnVisibility(true);
 }
 
 function init(){
