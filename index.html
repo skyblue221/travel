@@ -889,8 +889,15 @@ body{background:var(--bg);font-family:'Noto Sans KR',sans-serif;color:var(--text
       <button onclick="document.getElementById('diary-comment-modal').classList.remove('open')" style="background:none;border:none;font-size:20px;color:var(--text3);cursor:pointer">×</button>
     </div>
     <div id="diary-comment-photo" style="margin-bottom:10px"></div>
+    <div id="diary-edit-meta-row" style="display:none;gap:8px;margin-bottom:8px">
+      <select class="diary-day-sel" id="diary-edit-day-sel" style="flex:1"></select>
+      <input class="diary-time-inp" id="diary-edit-time-inp" placeholder="시간 (선택)" style="width:86px">
+    </div>
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
       <div id="diary-comment-text" style="font-size:13px;color:var(--text2);line-height:1.6;white-space:pre-wrap;flex:1"></div>
+      <textarea id="diary-edit-text" class="diary-comment-inp" style="display:none;flex:1;height:64px;margin-bottom:0"></textarea>
+      <button id="diary-edit-btn" onclick="startEditDiary()" style="background:none;border:1px solid var(--accent2);color:var(--accent2);border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;flex-shrink:0;display:none">수정</button>
+      <button id="diary-edit-save-btn" onclick="saveEditDiary()" style="background:var(--accent2);color:white;border:none;border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;flex-shrink:0;display:none">저장</button>
       <button id="diary-del-btn" onclick="deleteDiaryFromModal()" style="background:none;border:1px solid #e07070;color:#e07070;border-radius:8px;padding:4px 10px;font-size:11px;cursor:pointer;flex-shrink:0;display:none">삭제</button>
     </div>
     <div style="border-top:1px solid var(--border);padding-top:12px;flex:1;display:flex;flex-direction:column;min-height:0">
@@ -2886,6 +2893,24 @@ async function preloadCommentCounts(type, ids){
   }catch(e){}
 }
 
+// 특정 target_type(메모/일기)의 모든 댓글을 한 번에 가져와서 target_id별로 그룹화
+// (다운로드/노션 동기화에서 댓글까지 같이 포함시킬 때 사용)
+async function fetchAllCommentsByType(type){
+  if(!CFG.supabaseUrl||!currentTripId) return {};
+  try{
+    const tripId=currentTripId;
+    const data=await sbFetch('comments','GET',null,
+      'trip_id=eq.'+tripId+'&target_type=eq.'+type+'&order=created_at.asc'
+    );
+    const grouped={};
+    (data||[]).forEach(function(c){
+      if(!grouped[c.target_id]) grouped[c.target_id]=[];
+      grouped[c.target_id].push(c);
+    });
+    return grouped;
+  }catch(e){ console.error('댓글 불러오기 실패:', e); return {}; }
+}
+
 async function deleteDiaryFromModal(){
   if(!viewingDiaryId) return;
   const entry=S.diary.find(function(e){return e.id===viewingDiaryId;});
@@ -2900,10 +2925,12 @@ async function deleteDiaryFromModal(){
 async function openDiaryComment(entry){
   viewingDiaryId = entry.id;
   document.getElementById('diary-comment-title').textContent = '💬 '+(entry.time||entry.dayLabel||'순간')+(entry.author?' · '+entry.author:'');
-  // 삭제 버튼 — 내 글만
+  // 삭제/수정 버튼 — 내 글만
   const isMyDiary2 = !entry.author || (CFG.myName && entry.author===CFG.myName);
   const diaryDelBtn=document.getElementById('diary-del-btn');
   if(diaryDelBtn) diaryDelBtn.style.display=isMyDiary2?'inline-block':'none';
+  const diaryEditBtn=document.getElementById('diary-edit-btn');
+  if(diaryEditBtn) diaryEditBtn.style.display=isMyDiary2?'inline-block':'none';
   // 사진 표시
   const photoEl = document.getElementById('diary-comment-photo');
   if(entry.photoData){
@@ -2912,12 +2939,77 @@ async function openDiaryComment(entry){
     photoEl.innerHTML='';
   }
   document.getElementById('diary-comment-text').textContent = entry.comment||'';
+  document.getElementById('diary-comment-text').style.display='block';
+  document.getElementById('diary-edit-text').style.display='none';
+  document.getElementById('diary-edit-meta-row').style.display='none';
+  document.getElementById('diary-edit-save-btn').style.display='none';
+  if(diaryEditBtn) diaryEditBtn.style.display=isMyDiary2?'inline-block':'none';
   document.getElementById('diary-comment-modal').classList.add('open');
   // 댓글 로드
   const listEl = document.getElementById('diary-comments-list');
   if(listEl) listEl.innerHTML='<div class="comment-empty">불러오는 중...</div>';
   const comments = await loadComments('diary', entry.id);
   renderComments(comments, listEl);
+}
+// 일기 한마디 수정 — 보기 모드 → 입력 모드로 전환
+function startEditDiary(){
+  if(!viewingDiaryId) return;
+  const entry=S.diary.find(function(e){return e.id===viewingDiaryId;});
+  if(!entry) return;
+  document.getElementById('diary-comment-text').style.display='none';
+  document.getElementById('diary-edit-btn').style.display='none';
+  const ta=document.getElementById('diary-edit-text');
+  ta.value=entry.comment||'';
+  ta.style.display='block';
+  ta.focus();
+  // Day/시간 선택 영역도 같이 채워서 보여줌
+  const daySel=document.getElementById('diary-edit-day-sel');
+  const days=getDayGroups();
+  daySel.innerHTML = days.length
+    ? days.map(d=>`<option value="${d.dayIdx}">${d.dayLabel}${d.date?' · '+d.date:''}</option>`).join('')+'<option value="-1">날짜 없이</option>'
+    : '<option value="-1">날짜 없이</option>';
+  daySel.value = String(entry.dayIdx);
+  document.getElementById('diary-edit-time-inp').value = entry.time||'';
+  document.getElementById('diary-edit-meta-row').style.display='flex';
+  document.getElementById('diary-edit-save-btn').style.display='inline-block';
+}
+// 일기 한마디/날짜/시간 수정 — 저장
+function saveEditDiary(){
+  if(!viewingDiaryId) return;
+  const id=viewingDiaryId; // 이후 모달이 닫혀도 안전하게 쓰기 위해 따로 보관
+  const entry=S.diary.find(function(e){return e.id===id;});
+  if(!entry) return;
+  const newComment=document.getElementById('diary-edit-text').value.trim();
+  const daySelVal=document.getElementById('diary-edit-day-sel').value;
+  const newDayIdx=daySelVal==='-1'?-1:Number(daySelVal);
+  const newTime=document.getElementById('diary-edit-time-inp').value.trim();
+  const days=getDayGroups(), day=days.find(function(d){return d.dayIdx===newDayIdx;});
+  entry.comment=newComment;
+  entry.dayIdx=newDayIdx;
+  entry.dayLabel=day?day.dayLabel:'기타';
+  entry.date=day?day.date:'';
+  entry.time=newTime;
+  saveLocal();
+  renderDiary();
+  // 모달 내 표시도 갱신
+  document.getElementById('diary-comment-title').textContent = '💬 '+(entry.time||entry.dayLabel||'순간')+(entry.author?' · '+entry.author:'');
+  document.getElementById('diary-comment-text').textContent=newComment;
+  document.getElementById('diary-comment-text').style.display='block';
+  document.getElementById('diary-edit-text').style.display='none';
+  document.getElementById('diary-edit-meta-row').style.display='none';
+  document.getElementById('diary-edit-save-btn').style.display='none';
+  const isMyDiary2 = !entry.author || (CFG.myName && entry.author===CFG.myName);
+  document.getElementById('diary-edit-btn').style.display=isMyDiary2?'inline-block':'none';
+  showToast('✏️ 일기가 수정됐어요');
+  if(CFG.supabaseUrl && currentTripId){
+    sbFetch('diary','PATCH',{
+      comment: newComment,
+      day_idx: String(entry.dayIdx),
+      day_label: entry.dayLabel,
+      date: entry.date,
+      time: entry.time
+    },'id=eq.'+id).catch(sbCatch('일기 수정'));
+  }
 }
 
 function renderDiary(){
@@ -3131,7 +3223,7 @@ function exportDiary(){
 }
 // ===================== 여행 전체 내보내기 (위시/체크/일정+장소/메모/예산/일기) =====================
 // 내용(css + bodyHtml)을 만드는 부분 — 다운로드(HTML 파일)와 인쇄(PDF로 저장) 둘 다에서 재사용
-function buildFullTripContent(){
+async function buildFullTripContent(){
   const tripName=S.settings.tripName||'우리 여행';
   const dateStart=S.settings.dateStart||'';
   const dateEnd=S.settings.dateEnd||'';
@@ -3139,6 +3231,18 @@ function buildFullTripContent(){
   const totalExp=S.expenses?S.expenses.reduce((s,e)=>s+e.amount,0):0;
 
   function esc(s){ return (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+  // 메모/일기에 달린 댓글들을 미리 한 번에 가져옴 (target_id별로 그룹화)
+  const [memoComments, diaryComments] = await Promise.all([
+    fetchAllCommentsByType('memo'),
+    fetchAllCommentsByType('diary')
+  ]);
+  function commentsBlock(targetId, commentMap){
+    const list = commentMap[targetId];
+    if(!list||!list.length) return '';
+    const rows = list.map(c=>'<div class="ft-comment-row"><span class="ft-comment-author">'+esc(c.author||'익명')+'</span> '+esc(c.body)+'</div>').join('');
+    return '<div class="ft-comments">'+rows+'</div>';
+  }
 
   // 1) 위시리스트
   const wishPlaces = S.wish.filter(w=>w.type==='place');
@@ -3173,7 +3277,7 @@ function buildFullTripContent(){
   // 4) 메모
   function memoHtml(){
     if(!S.memos.length) return '<div class="ft-empty">(아직 없어요)</div>';
-    return S.memos.map(m=>'<div class="ft-memo"><div class="ft-memo-title">'+esc(m.title)+'</div><div class="ft-memo-body">'+esc(m.body).replace(/\n/g,'<br>')+'</div></div>').join('');
+    return S.memos.map(m=>'<div class="ft-memo"><div class="ft-memo-title">'+esc(m.title)+'</div><div class="ft-memo-body">'+esc(m.body).replace(/\n/g,'<br>')+'</div>'+commentsBlock(m.id, memoComments)+'</div>').join('');
   }
 
   // 5) 예산
@@ -3192,7 +3296,7 @@ function buildFullTripContent(){
       const cards = g.items.map(function(e){
         const img = e.photoData ? '<img class="ft-diary-img" src="'+e.photoData+'" alt="">' : '<div class="ft-diary-noimg">📷</div>';
         const time = e.time ? '<span class="ft-time">'+esc(e.time)+'</span> ' : '';
-        return '<div class="ft-diary-card">'+img+'<div class="ft-diary-cap">'+time+esc(e.comment)+'</div></div>';
+        return '<div class="ft-diary-card">'+img+'<div class="ft-diary-cap">'+time+esc(e.comment)+'</div>'+commentsBlock(e.id, diaryComments)+'</div>';
       }).join('');
       return '<div class="ft-day"><div class="ft-day-title">'+esc(g.label)+(g.date?' <span class="ft-day-date">· '+esc(g.date)+'</span>':'')+'</div><div class="ft-diary-grid">'+cards+'</div></div>';
     }).join('');
@@ -3236,6 +3340,9 @@ function buildFullTripContent(){
     '.ft-diary-img{width:100%;aspect-ratio:1;object-fit:cover;display:block}',
     '.ft-diary-noimg{width:100%;aspect-ratio:1;background:#f0e6da;display:flex;align-items:center;justify-content:center;font-size:28px}',
     '.ft-diary-cap{padding:8px 9px;font-size:11.5px;color:#5a4a40;line-height:1.5;white-space:pre-wrap}',
+    '.ft-comments{margin:0 9px 8px;padding-top:6px;border-top:1px dashed #ecddd0}',
+    '.ft-comment-row{font-size:11px;color:#7a6a60;padding:2px 0;line-height:1.5}',
+    '.ft-comment-author{font-weight:600;color:#a8623f}',
     '.footer{text-align:center;padding:36px 20px;font-size:12px;color:#b0a090;line-height:2}',
   ].join('');
 
@@ -3258,8 +3365,9 @@ function buildFullTripContent(){
 }
 
 // 다운로드(HTML 파일로 저장) — PC 등 HTML이 바로 열리는 환경에서 사용
-function exportFullTrip(){
-  const { tripName, css, bodyHtml } = buildFullTripContent();
+async function exportFullTrip(){
+  showToast('📦 정리하는 중...');
+  const { tripName, css, bodyHtml } = await buildFullTripContent();
   const html = '<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+tripName+'</title><style>'+css+'</style></head><body>'+bodyHtml+'</body></html>';
 
   const blob=new Blob([html],{type:'text/html;charset=utf-8'});
@@ -3271,8 +3379,9 @@ function exportFullTrip(){
 }
 
 // 인쇄(모바일 "공유 → PDF로 저장") — 화면에 임시로 끼워넣고 그 부분만 인쇄
-function printFullTrip(){
-  const { css, bodyHtml } = buildFullTripContent();
+async function printFullTrip(){
+  showToast('🖨️ 정리하는 중...');
+  const { css, bodyHtml } = await buildFullTripContent();
   // 임시 스타일 + 콘텐츠를 body 끝에 추가
   const styleTag = document.createElement('style');
   styleTag.id = 'ft-print-style-temp';
@@ -3390,7 +3499,7 @@ async function createNotionTripPage(){
     parent: { database_id: NOTION_DB_ID },
     icon: { type: 'emoji', emoji: '✈️' },
     properties: props,
-    children: buildPageContent()
+    children: await buildPageContent()
   });
 
   if(!data) return;
@@ -3404,9 +3513,10 @@ async function createNotionTripPage(){
   showToast('📓 노션 페이지 만들어졌어요!');
 }
 
-function buildPageContent(){
+async function buildPageContent(){
   const NL = '\n';
   const blocks = [];
+  const memoComments = await fetchAllCommentsByType('memo');
 
   // 위시리스트
   blocks.push({ object:'block', type:'heading_2', heading_2:{ rich_text:[{type:'text',text:{content:'🌟 위시리스트'}}] }});
@@ -3465,6 +3575,12 @@ function buildPageContent(){
     S.memos.forEach(function(m){
       blocks.push({ object:'block', type:'heading_3', heading_3:{ rich_text:[{type:'text',text:{content:m.title}}] }});
       blocks.push({ object:'block', type:'paragraph', paragraph:{ rich_text:[{type:'text',text:{content:m.body}}] }});
+      const cmts = memoComments[m.id];
+      if(cmts && cmts.length){
+        cmts.forEach(function(c){
+          blocks.push({ object:'block', type:'bulleted_list_item', bulleted_list_item:{ rich_text:[{type:'text',text:{content:'💬 '+(c.author||'익명')+': '+c.body},annotations:{color:'gray'}}] }});
+        });
+      }
     });
   } else {
     blocks.push({ object:'block', type:'paragraph', paragraph:{ rich_text:[{type:'text',text:{content:'(아직 없어요)'}}] }});
@@ -3510,7 +3626,7 @@ async function syncToNotion(){
   }
 
   // 새 내용으로 업데이트 (100개 제한으로 분할)
-  const allBlocks = buildPageContent();
+  const allBlocks = await buildPageContent();
   const chunkSize = 95;
   for(let i=0; i<allBlocks.length; i+=chunkSize){
     const chunk = allBlocks.slice(i, i+chunkSize);
