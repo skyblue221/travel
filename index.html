@@ -3244,20 +3244,6 @@ async function buildFullTripContent(){
     return '<div class="ft-comments">'+rows+'</div>';
   }
 
-  // 1) 위시리스트
-  const wishPlaces = S.wish.filter(w=>w.type==='place');
-  const wishDos = S.wish.filter(w=>w.type==='do');
-  function wishList(arr){
-    if(!arr.length) return '<div class="ft-empty">(아직 없어요)</div>';
-    return '<ul class="ft-list">'+arr.map(w=>'<li class="'+(w.done?'done':'')+'">'+(w.done?'✅ ':'⬜ ')+esc(w.text)+'</li>').join('')+'</ul>';
-  }
-
-  // 2) 체크리스트
-  function checklistHtml(){
-    if(!S.checklist.length) return '<div class="ft-empty">(아직 없어요)</div>';
-    return '<ul class="ft-list">'+S.checklist.map(c=>'<li class="'+(c.checked?'done':'')+'">'+(c.checked?'✅ ':'⬜ ')+'<span class="ft-tag">'+esc(c.cat)+'</span> '+esc(c.text)+'</li>').join('')+'</ul>';
-  }
-
   // 3) 일정 (장소 포함)
   function scheduleHtml(){
     const days = getDayGroups();
@@ -3350,11 +3336,6 @@ async function buildFullTripContent(){
       + (coverDate?'<div class="cover-sub">'+coverDate+'</div>':'')
       + (coverMembers?'<div class="cover-sub">'+coverMembers+'</div>':'')
     + '</div>'
-    + '<div class="ft-section"><div class="ft-section-title">🌟 위시리스트</div>'
-      + '<div style="font-size:13px;font-weight:600;margin:10px 0 6px;color:#8a7a6a">📍 가고 싶은 곳</div>'+wishList(wishPlaces)
-      + '<div style="font-size:13px;font-weight:600;margin:14px 0 6px;color:#8a7a6a">🎉 하고 싶은 것</div>'+wishList(wishDos)
-    + '</div>'
-    + '<div class="ft-section"><div class="ft-section-title">✅ 체크리스트</div>'+checklistHtml()+'</div>'
     + '<div class="ft-section"><div class="ft-section-title">🗓️ 일정</div>'+scheduleHtml()+'</div>'
     + '<div class="ft-section"><div class="ft-section-title">📝 메모</div>'+memoHtml()+'</div>'
     + '<div class="ft-section"><div class="ft-section-title">💰 예산</div>'+expenseHtml()+'</div>'
@@ -3460,7 +3441,8 @@ function setNotionStatusUI(status, msg){
   text.textContent=msg;
 }
 
-async function notionFetch(endpoint, method, body){
+async function notionFetch(endpoint, method, body, opts2){
+  opts2 = opts2 || {};
   if(!CFG.notionApiKey){ showToast('설정에서 노션 API 키를 먼저 입력해주세요'); return null; }
   try{
     const url = NOTION_PROXY + encodeURIComponent(NOTION_API + endpoint);
@@ -3474,10 +3456,16 @@ async function notionFetch(endpoint, method, body){
     };
     if(body) opts.body = JSON.stringify(body);
     const res = await fetch(url, opts);
-    if(!res.ok){ const e=await res.json(); throw new Error(e.message||'노션 API 오류 '+res.status); }
+    if(!res.ok){
+      const e=await res.json();
+      const err = new Error(e.message||'노션 API 오류 '+res.status);
+      err.status = res.status;
+      throw err;
+    }
     return await res.json();
   } catch(e){
-    showToast('노션 오류: '+e.message);
+    if(!opts2.silent) showToast('노션 오류: '+e.message);
+    if(opts2.throwOnError) throw e;
     return null;
   }
 }
@@ -3615,7 +3603,22 @@ async function syncToNotion(){
   showToast('📓 노션에 동기화 중...');
 
   // 기존 페이지 블록 모두 삭제 후 재작성
-  const existing = await notionFetch('/blocks/'+trip.notionPageId+'/children', 'GET');
+  let existing;
+  try{
+    existing = await notionFetch('/blocks/'+trip.notionPageId+'/children', 'GET', null, {silent:true, throwOnError:true});
+  }catch(e){
+    if(e.status===404){
+      // 노션에서 페이지가 직접 삭제된 경우 — 앱이 기억하던 연결을 끊고 다시 만들 수 있게 안내
+      trip.notionPageId = null;
+      saveTrips();
+      document.getElementById('notion-sync-bar').style.display='none';
+      updateNotionCreateBtnVisibility(true);
+      showToast('📓 노션에서 페이지가 삭제된 것 같아요. 설정에서 다시 만들어주세요!');
+      return;
+    }
+    showToast('노션 오류: '+e.message);
+    return;
+  }
   if(!existing) return;
 
   // 기존 블록 삭제
